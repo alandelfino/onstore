@@ -44,7 +44,7 @@ async function setupVite(app2, server2) {
 // server/routes.ts
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { eq as eq3, desc, ilike, or, sql as sql2 } from "drizzle-orm";
+import { eq as eq3, desc, ilike, or, sql as sql2, inArray } from "drizzle-orm";
 
 // server/db.ts
 import { Pool } from "pg";
@@ -149,8 +149,12 @@ var videoCarousels = pgTable("video_carousels", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   title: text("title"),
-  description: text("description"),
+  subtitle: text("subtitle"),
+  titleColor: text("title_color").notNull().default("#000000"),
+  subtitleColor: text("subtitle_color").notNull().default("#666666"),
+  layout: text("layout").notNull().default("3d-card"),
   showProducts: boolean("show_products").notNull().default(true),
+  previewTime: integer("preview_time").notNull().default(3),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow()
 });
@@ -405,380 +409,587 @@ async function processQueue() {
 import multer2 from "multer";
 import { v4 as uuidv42 } from "uuid";
 
+// server/embed/styles.ts
+var embedStyles = function injectStyles() {
+  if (document.getElementById("vidshop-frc-styles"))
+    return;
+  var style = document.createElement("style");
+  style.id = "vidshop-frc-styles";
+  style.textContent = ".fashion-reels-carousel { width: 100%; overflow: hidden; display: flex; flex-direction: column; align-items: center; padding: 60px 0; padding-top: 0px; contain: layout paint style; background-color: transparent; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none; } .fashion-reels-carousel * { box-sizing: border-box; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none; } .fashion-reels-carousel .frc-carousel { position: relative; width: 100%; height: 500px; display: flex; align-items: center; justify-content: center; isolation: isolate; perspective: 1200px; } .fashion-reels-carousel .frc-slide { position: absolute; width: auto; height: 100%; aspect-ratio: 9 / 16; border-radius: 24px; overflow: hidden; opacity: 0; transform: translateX(0) scale(.8) rotateY(0deg); transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.6s ease, box-shadow 0.6s ease; will-change: transform, opacity; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: #fff; pointer-events: none; box-shadow: 0 10px 30px rgba(0,0,0,0.1); } .fashion-reels-carousel .frc-slide video { width: 100%; height: 100%; object-fit: cover; display: block; background: #fff; transition: filter 0.6s ease; filter: brightness(0.6); } .fashion-reels-carousel .frc-slide.is-center { transform: translateX(0) scale(1) rotateY(0deg); opacity: 1; z-index: 5; pointer-events: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); } .fashion-reels-carousel .frc-slide.is-center video { filter: brightness(1); } .fashion-reels-carousel .frc-slide.is-left-1 { transform: translateX(-85%) scale(.85) rotateY(12deg); opacity: .8; z-index: 4; } .fashion-reels-carousel .frc-slide.is-right-1 { transform: translateX(85%) scale(.85) rotateY(-12deg); opacity: .8; z-index: 4; } .fashion-reels-carousel .frc-slide.is-left-2 { transform: translateX(-160%) scale(.7) rotateY(20deg); opacity: .4; z-index: 3; } .fashion-reels-carousel .frc-slide.is-right-2 { transform: translateX(160%) scale(.7) rotateY(-20deg); opacity: .4; z-index: 3; } .fashion-reels-carousel .frc-slide.is-hidden-left { transform: translateX(-220%) scale(.6) rotateY(25deg); opacity: 0; z-index: 1; } .fashion-reels-carousel .frc-slide.is-hidden-right { transform: translateX(220%) scale(.6) rotateY(-25deg); opacity: 0; z-index: 1; } @media (max-width: 900px) { .fashion-reels-carousel .frc-carousel { height: 450px; } } @media (max-width: 600px) {   .fashion-reels-carousel { padding: 50px 0; }   .fashion-reels-carousel .frc-carousel { height: calc(76vw * 16 / 9); max-height: 85vh; min-height: 380px; perspective: 800px; }   .fashion-reels-carousel .frc-slide { width: 76%; max-width: calc(85vh * 9 / 16); height: auto; aspect-ratio: 9 / 16; border-radius: 18px; }   .fashion-reels-carousel .frc-slide.is-left-1 { transform: translateX(-65%) scale(.85) rotateY(20deg); opacity: 0.9; }   .fashion-reels-carousel .frc-slide.is-right-1 { transform: translateX(65%) scale(.85) rotateY(-20deg); opacity: 0.9; }   .fashion-reels-carousel .frc-slide.is-left-2 { transform: translateX(-110%) scale(.7) rotateY(30deg); opacity: 0.5; }   .fashion-reels-carousel .frc-slide.is-right-2 { transform: translateX(110%) scale(.7) rotateY(-30deg); opacity: 0.5; }   .fashion-reels-carousel .frc-slide.is-hidden-left { transform: translateX(-160%) scale(.6) rotateY(35deg); opacity: 0; }   .fashion-reels-carousel .frc-slide.is-hidden-right { transform: translateX(160%) scale(.6) rotateY(-35deg); opacity: 0; } } @media (prefers-reduced-motion: reduce) { .fashion-reels-carousel .frc-slide { transition: none; } } .fashion-reels-carousel .frc-controls { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 8px; opacity: 0; transition: opacity 0.3s ease; z-index: 10; pointer-events: none; } .fashion-reels-carousel .frc-slide.is-center .frc-controls { opacity: 1; pointer-events: auto; } .fashion-reels-carousel .frc-btn { background: transparent; border: none; border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: background 0.2s, transform 0.2s; } .fashion-reels-carousel .frc-btn:active { transform: scale(0.9); } .fashion-reels-carousel .frc-btn:hover { background: rgba(0, 0, 0, 0.7); } .fashion-reels-carousel .frc-btn svg { width: 20px; height: 20px; } .vidshop-slider-carousel { width: 100%; display: flex; flex-direction: column; align-items: center; padding: 40px 0; font-family: inherit; -webkit-user-select: none; user-select: none; } .vidshop-slider-track { display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 16px 20px; width: 100%; scrollbar-width: none; -webkit-overflow-scrolling: touch; } .vidshop-slider-track::-webkit-scrollbar { display: none; } .vidshop-slider-slide { position: relative; flex: 0 0 calc(16.666% - 13.33px); aspect-ratio: 9/16; border-radius: 16px; overflow: hidden; scroll-snap-align: start; background: #000; box-shadow: 0 4px 12px rgba(0,0,0,0.1); isolation: isolate; cursor: pointer; } @media (max-width: 1400px) { .vidshop-slider-slide { flex: 0 0 calc(20% - 12.8px); } } @media (max-width: 1100px) { .vidshop-slider-slide { flex: 0 0 calc(25% - 12px); } } @media (max-width: 900px) { .vidshop-slider-slide { flex: 0 0 calc(40% - 13px); } } @media (max-width: 600px) {   .vidshop-slider-track { padding: 12px 5%; gap: 12px; }   .vidshop-slider-slide { flex: 0 0 82%; scroll-snap-align: center; border-radius: 12px; } } .vidshop-slider-slide video { width: 100%; height: 100%; object-fit: cover; display: block; } .vidshop-slider-play-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); z-index: 10; pointer-events: none; opacity: 1; transition: opacity 0.3s; } .vidshop-slider-slide.is-playing .vidshop-slider-play-overlay { opacity: 0; } .vidshop-slider-play-overlay svg { width: 48px; height: 48px; fill: white; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); } .fashion-reels-carousel .frc-product-card, .vidshop-slider-slide .frc-product-card { position: absolute; bottom: 20px; left: 16px; right: 16px; border-radius: 12px; padding: 10px; display: flex; align-items: center; gap: 12px; color: #fff; z-index: 20; opacity: 0; pointer-events: none; transition: opacity 0.3s ease, transform 0.3s ease; transform: translateY(10px); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); border: none; box-shadow: 0 4px 20px rgba(0,0,0,0.15); background: transparent; } .fashion-reels-carousel .frc-product-card.is-active, .vidshop-slider-slide .frc-product-card.is-active { opacity: 1; pointer-events: auto; transform: translateY(0); } .fashion-reels-carousel .frc-product-img, .vidshop-slider-slide .frc-product-img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: #fff; flex-shrink: 0; } .fashion-reels-carousel .frc-product-info, .vidshop-slider-slide .frc-product-info { flex: 1; min-width: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: center; } .fashion-reels-carousel .frc-product-title, .vidshop-slider-slide .frc-product-title { margin: 0 0 2px 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; font-family: sans-serif; text-shadow: 0 1px 2px rgba(0,0,0,0.5); } .fashion-reels-carousel .frc-product-price, .vidshop-slider-slide .frc-product-price { margin: 0; font-size: 14px; font-weight: 700; color: #fff; font-family: sans-serif; text-shadow: 0 1px 2px rgba(0,0,0,0.5); } .fashion-reels-carousel .frc-product-btn, .vidshop-slider-slide .frc-product-btn { width: auto; height: auto; border-radius: 50%; display: flex; align-items: center; justify-content: center; text-decoration: none; flex-shrink: 0; transition: transform 0.2s; color: #fff; padding: 3px; } .fashion-reels-carousel .frc-product-btn:hover, .vidshop-slider-slide .frc-product-btn:hover { transform: scale(1.05); } .fashion-reels-carousel .frc-product-btn svg, .vidshop-slider-slide .frc-product-btn svg { width: 16px; height: 16px; stroke-width: 2.5; } @media (max-width: 600px) {   .fashion-reels-carousel .frc-product-card, .vidshop-slider-slide .frc-product-card { bottom: 12px; left: 10px; right: 10px; padding: 8px; gap: 8px; border-radius: 10px; }   .fashion-reels-carousel .frc-product-img, .vidshop-slider-slide .frc-product-img { width: 36px; height: 36px; border-radius: 6px; }   .fashion-reels-carousel .frc-product-title, .vidshop-slider-slide .frc-product-title { font-size: 11px; margin-bottom: 2px; }   .fashion-reels-carousel .frc-product-price, .vidshop-slider-slide .frc-product-price { font-size: 13px; }   .fashion-reels-carousel .frc-product-btn svg, .vidshop-slider-slide .frc-product-btn svg { width: 14px; height: 14px; } }";
+  document.head.appendChild(style);
+};
+
+// server/embed/layout-3d-card.ts
+var layout3DCard = function build3DCard(el, data) {
+  var originalVideos = data.videos || [];
+  if (!originalVideos.length)
+    return;
+  var videos = [];
+  if (originalVideos.length < 6 && originalVideos.length > 0) {
+    var i = 0;
+    while (videos.length < 6) {
+      videos.push(originalVideos[i % originalVideos.length]);
+      i++;
+    }
+  } else {
+    videos = originalVideos;
+  }
+  el.classList.add("fashion-reels-carousel");
+  el.setAttribute("data-autoplay", "6000");
+  var headerHtml = "";
+  if (data.carousel.title || data.carousel.subtitle) {
+    headerHtml += '<div style="text-align: center; margin-bottom: 24px; padding: 0 16px; width: 100%;">';
+    if (data.carousel.title) {
+      headerHtml += '<h2 style="margin: 0 0 8px 0; font-family: inherit; font-size: 28px; font-weight: 700; color: ' + escAttr(data.carousel.titleColor || "#000000") + ';">' + escAttr(data.carousel.title) + "</h2>";
+    }
+    if (data.carousel.subtitle) {
+      headerHtml += '<p style="margin: 0; font-family: inherit; font-size: 16px; color: ' + escAttr(data.carousel.subtitleColor || "#666666") + ';">' + escAttr(data.carousel.subtitle) + "</p>";
+    }
+    headerHtml += "</div>";
+  }
+  var html = headerHtml + '<div class="frc-carousel">';
+  videos.forEach(function(v) {
+    html += '<div class="frc-slide">';
+    html += '<video muted playsinline loop preload="metadata" poster="' + (v.thumbnailUrl ? escAttr(v.thumbnailUrl) : "") + '">';
+    html += '<source src="' + escAttr(v.mediaUrl) + '" type="video/mp4">';
+    html += "</video>";
+    if (data.carousel.showProducts && v.productsList && v.productsList.length > 0) {
+      v.productsList.forEach(function(p) {
+        var priceHtml = p.price ? '<p class="frc-product-price">' + escAttr(p.price) + "</p>" : "";
+        var imgHtml = p.imageLink ? '<img class="frc-product-img" src="' + escAttr(p.imageLink) + '" alt=""/>' : '<div class="frc-product-img" style="background: #333;"></div>';
+        var cartIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>';
+        var link = p.link ? escAttr(p.link) : "#";
+        html += '<div class="frc-product-card" data-start="' + p.startTime + '" data-end="' + p.endTime + '">' + imgHtml + '<div class="frc-product-info"><h3 class="frc-product-title">' + escAttr(p.title) + "</h3>" + priceHtml + '</div><a href="' + link + '" target="_blank" class="frc-product-btn" aria-label="Comprar">' + cartIcon + "</a></div>";
+      });
+    }
+    html += "</div>";
+  });
+  html += "</div>";
+  el.innerHTML = html;
+  init3DCardLogic(el);
+  function init3DCardLogic(root) {
+    if (root.dataset.frcInitialized === "true")
+      return;
+    root.dataset.frcInitialized = "true";
+    var slides = Array.from(root.querySelectorAll(".frc-slide"));
+    var videos2 = slides.map(function(slide) {
+      return slide.querySelector("video");
+    });
+    var autoplayDelay = Number(root.dataset.autoplay || 6e3);
+    videos2.forEach(function(video, index) {
+      var slide = slides[index];
+      var productCards = Array.from(slide.querySelectorAll(".frc-product-card"));
+      if (!productCards.length)
+        return;
+      video.addEventListener("timeupdate", function() {
+        var ct = video.currentTime;
+        productCards.forEach(function(card) {
+          var start = Number(card.dataset.start);
+          var end = Number(card.dataset.end);
+          if (ct >= start && ct <= end) {
+            if (!card.classList.contains("is-active"))
+              card.classList.add("is-active");
+          } else {
+            if (card.classList.contains("is-active"))
+              card.classList.remove("is-active");
+          }
+        });
+      });
+    });
+    var current = Math.floor(slides.length / 2);
+    var timer = null;
+    var isVisible = false;
+    var isPageVisible = !document.hidden;
+    var lastCurrent = -1;
+    var isManualPause = false;
+    var touchStartX = 0;
+    var touchEndX = 0;
+    function getOffset(index, active, total) {
+      var offset = index - active;
+      if (offset > total / 2)
+        offset -= total;
+      if (offset < -total / 2)
+        offset += total;
+      return offset;
+    }
+    function applyClasses() {
+      var total = slides.length;
+      slides.forEach(function(slide, index) {
+        slide.className = "frc-slide";
+        var offset = getOffset(index, current, total);
+        if (offset === 0)
+          slide.classList.add("is-center");
+        else if (offset === -1)
+          slide.classList.add("is-left-1");
+        else if (offset === 1)
+          slide.classList.add("is-right-1");
+        else if (offset === -2)
+          slide.classList.add("is-left-2");
+        else if (offset === 2)
+          slide.classList.add("is-right-2");
+        else if (offset < 0)
+          slide.classList.add("is-hidden-left");
+        else
+          slide.classList.add("is-hidden-right");
+      });
+    }
+    function pauseAllVideos() {
+      videos2.forEach(function(video) {
+        try {
+          video.pause();
+        } catch (e) {
+        }
+      });
+    }
+    function playCurrentVideo() {
+      if (isManualPause) {
+        pauseAllVideos();
+        return;
+      }
+      videos2.forEach(function(video, index) {
+        if (index === current && isVisible && isPageVisible) {
+          if (lastCurrent !== current) {
+            try {
+              video.currentTime = 0;
+            } catch (e) {
+            }
+          }
+          var playPromise = video.play();
+          if (playPromise && typeof playPromise.catch === "function") {
+            playPromise.catch(function() {
+            });
+          }
+        } else {
+          try {
+            video.pause();
+          } catch (e) {
+          }
+        }
+      });
+      lastCurrent = current;
+    }
+    function update() {
+      isManualPause = false;
+      applyClasses();
+      playCurrentVideo();
+    }
+    function next() {
+      current = (current + 1) % slides.length;
+      update();
+    }
+    function prev() {
+      current = (current - 1 + slides.length) % slides.length;
+      update();
+    }
+    function startTimer() {
+      if (timer || !isVisible || !isPageVisible || isManualPause)
+        return;
+      timer = window.setInterval(next, autoplayDelay);
+    }
+    function stopTimer() {
+      if (!timer)
+        return;
+      window.clearInterval(timer);
+      timer = null;
+    }
+    function resetTimer() {
+      stopTimer();
+      startTimer();
+    }
+    if (window.IntersectionObserver) {
+      var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          isVisible = entry.isIntersecting && entry.intersectionRatio > 0.2;
+          if (isVisible) {
+            if (!isManualPause) {
+              update();
+              startTimer();
+            }
+          } else {
+            stopTimer();
+            pauseAllVideos();
+          }
+        });
+      }, { threshold: [0, 0.2, 0.6] });
+      observer.observe(root);
+    } else {
+      isVisible = true;
+    }
+    document.addEventListener("visibilitychange", function() {
+      isPageVisible = !document.hidden;
+      if (isPageVisible && isVisible) {
+        if (!isManualPause) {
+          playCurrentVideo();
+          startTimer();
+        }
+      } else {
+        stopTimer();
+        pauseAllVideos();
+      }
+    });
+    var touchStartY = 0;
+    var isSwipingHorizontal = null;
+    root.addEventListener("touchstart", function(e) {
+      touchStartX = e.changedTouches[0].screenX;
+      touchStartY = e.changedTouches[0].screenY;
+      isSwipingHorizontal = null;
+      root.dataset.isDragging = "true";
+    }, { passive: true });
+    root.addEventListener("touchmove", function(e) {
+      if (!root.dataset.isDragging)
+        return;
+      var touchCurrentX = e.changedTouches[0].screenX;
+      var touchCurrentY = e.changedTouches[0].screenY;
+      var dx = Math.abs(touchCurrentX - touchStartX);
+      var dy = Math.abs(touchCurrentY - touchStartY);
+      if (isSwipingHorizontal === null) {
+        if (dx > dy && dx > 5)
+          isSwipingHorizontal = true;
+        else if (dy > dx && dy > 5)
+          isSwipingHorizontal = false;
+      }
+      if (isSwipingHorizontal) {
+        if (e.cancelable)
+          e.preventDefault();
+      }
+    }, { passive: false });
+    root.addEventListener("touchend", function(e) {
+      root.dataset.isDragging = "";
+      if (isSwipingHorizontal === false)
+        return;
+      touchEndX = e.changedTouches[0].screenX;
+      var swipeThreshold = 40;
+      if (touchEndX < touchStartX - swipeThreshold) {
+        next();
+        resetTimer();
+      } else if (touchEndX > touchStartX + swipeThreshold) {
+        prev();
+        resetTimer();
+      }
+    }, { passive: true });
+    var isDragging = false;
+    var mouseStart = 0;
+    root.addEventListener("mousedown", function(e) {
+      isDragging = true;
+      mouseStart = e.screenX;
+    });
+    root.addEventListener("mouseup", function(e) {
+      if (!isDragging)
+        return;
+      isDragging = false;
+      var touchEnd = e.screenX;
+      var swipeThreshold = 40;
+      if (touchEnd < mouseStart - swipeThreshold) {
+        next();
+        resetTimer();
+      } else if (touchEnd > mouseStart + swipeThreshold) {
+        prev();
+        resetTimer();
+      }
+      root.dataset.lastDragDist = Math.abs(touchEnd - mouseStart);
+      setTimeout(function() {
+        root.dataset.lastDragDist = "0";
+      }, 50);
+    });
+    root.addEventListener("mouseleave", function() {
+      isDragging = false;
+    });
+    videos2.forEach(function(video, index) {
+      video.muted = true;
+      video.addEventListener("play", function() {
+        var slide = slides[index];
+        var playBtn = slide.querySelector(".frc-play-btn");
+        if (playBtn) {
+          playBtn.querySelector(".icon-pause").style.display = "block";
+          playBtn.querySelector(".icon-play").style.display = "none";
+        }
+      });
+      video.addEventListener("pause", function() {
+        var slide = slides[index];
+        var playBtn = slide.querySelector(".frc-play-btn");
+        if (playBtn) {
+          playBtn.querySelector(".icon-pause").style.display = "none";
+          playBtn.querySelector(".icon-play").style.display = "block";
+        }
+      });
+      video.addEventListener("volumechange", function() {
+        var slide = slides[index];
+        var muteBtn = slide.querySelector(".frc-mute-btn");
+        if (muteBtn) {
+          muteBtn.querySelector(".icon-mute").style.display = video.muted ? "block" : "none";
+          muteBtn.querySelector(".icon-unmute").style.display = video.muted ? "none" : "block";
+        }
+      });
+    });
+    slides.forEach(function(slide, index) {
+      var controls = document.createElement("div");
+      controls.className = "frc-controls";
+      controls.innerHTML = [
+        '<button class="frc-btn frc-mute-btn" aria-label="Mute/Unmute">',
+        '    <svg class="icon-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>',
+        '    <svg class="icon-unmute" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>',
+        "</button>",
+        '<button class="frc-btn frc-play-btn" aria-label="Play/Pause">',
+        '    <svg class="icon-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>',
+        '    <svg class="icon-play" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>',
+        "</button>"
+      ].join("");
+      slide.appendChild(controls);
+      var video = videos2[index];
+      var muteBtn = controls.querySelector(".frc-mute-btn");
+      var playBtn = controls.querySelector(".frc-play-btn");
+      muteBtn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        var setMuted = !video.muted;
+        videos2.forEach(function(v) {
+          v.muted = setMuted;
+        });
+      });
+      playBtn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        if (video.paused) {
+          isManualPause = false;
+          video.play();
+          startTimer();
+        } else {
+          isManualPause = true;
+          video.pause();
+          stopTimer();
+        }
+      });
+      slide.addEventListener("click", function(e) {
+        if (Number(root.dataset.lastDragDist) > 40)
+          return;
+        if (index === current) {
+          var setMuted = !video.muted;
+          videos2.forEach(function(v) {
+            v.muted = setMuted;
+          });
+        } else {
+          current = index;
+          update();
+          resetTimer();
+        }
+      });
+    });
+    update();
+  }
+};
+
+// server/embed/layout-slider.ts
+var layoutSlider = function buildSlider(el, data) {
+  var videos = data.videos || [];
+  if (!videos.length)
+    return;
+  if (videos.length < 6) {
+    var original = videos.slice();
+    while (videos.length < 6) {
+      videos = videos.concat(original);
+    }
+  }
+  var previewTime = data.carousel.previewTime || 3;
+  var uid = "vslider-" + Math.floor(Math.random() * 1e6);
+  el.classList.add("vidshop-slider-carousel", uid);
+  el.setAttribute("data-preview-time", String(previewTime * 1e3));
+  var headerHtml = "";
+  if (data.carousel.title || data.carousel.subtitle) {
+    headerHtml += '<div style="text-align: center; margin-bottom: 24px; padding: 0 16px; width: 100%;">';
+    if (data.carousel.title) {
+      headerHtml += '<h2 style="margin: 0 0 8px 0; font-family: inherit; font-size: 28px; font-weight: 700; color: ' + escAttr(data.carousel.titleColor || "#000000") + ';">' + escAttr(data.carousel.title) + "</h2>";
+    }
+    if (data.carousel.subtitle) {
+      headerHtml += '<p style="margin: 0; font-family: inherit; font-size: 16px; color: ' + escAttr(data.carousel.subtitleColor || "#666666") + ';">' + escAttr(data.carousel.subtitle) + "</p>";
+    }
+    headerHtml += "</div>";
+  }
+  var playIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+  var html = headerHtml + '<div class="vidshop-slider-track">';
+  videos.forEach(function(v) {
+    html += '<div class="vidshop-slider-slide">';
+    html += '<video loop playsinline preload="metadata" poster="' + (v.thumbnailUrl ? escAttr(v.thumbnailUrl) : "") + '">';
+    html += '<source src="' + escAttr(v.mediaUrl) + '" type="video/mp4">';
+    html += "</video>";
+    html += '<div class="vidshop-slider-play-overlay">' + playIcon + "</div>";
+    if (data.carousel.showProducts && v.productsList && v.productsList.length > 0) {
+      v.productsList.forEach(function(p) {
+        var priceHtml = p.price ? '<p class="frc-product-price">' + escAttr(p.price) + "</p>" : "";
+        var imgHtml = p.imageLink ? '<img class="frc-product-img" src="' + escAttr(p.imageLink) + '" alt=""/>' : '<div class="frc-product-img" style="background: #333;"></div>';
+        var cartIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>';
+        var link = p.link ? escAttr(p.link) : "#";
+        html += '<div class="frc-product-card" data-start="' + p.startTime + '" data-end="' + p.endTime + '">' + imgHtml + '<div class="frc-product-info"><h3 class="frc-product-title">' + escAttr(p.title) + "</h3>" + priceHtml + '</div><a href="' + link + '" target="_blank" class="frc-product-btn" aria-label="Comprar">' + cartIcon + "</a></div>";
+      });
+    }
+    html += "</div>";
+  });
+  html += "</div>";
+  el.innerHTML = html;
+  initSliderLogic(el);
+  function initSliderLogic(root) {
+    if (root.dataset.vsSliderInitialized === "true")
+      return;
+    root.dataset.vsSliderInitialized = "true";
+    var slides = Array.from(root.querySelectorAll(".vidshop-slider-slide"));
+    var videos2 = slides.map(function(s) {
+      return s.querySelector("video");
+    });
+    var track = root.querySelector(".vidshop-slider-track");
+    var previewTime2 = Number(root.dataset.previewTime || 3e3);
+    var isManualPause = false;
+    var currentPreview = -1;
+    var previewTimer = null;
+    var observer = null;
+    function playPreview(index) {
+      if (isManualPause)
+        return;
+      if (currentPreview !== -1 && videos2[currentPreview]) {
+        videos2[currentPreview].pause();
+        slides[currentPreview].classList.remove("is-playing");
+      }
+      currentPreview = index;
+      var video = videos2[currentPreview];
+      var slide = slides[currentPreview];
+      if (!video)
+        return;
+      video.muted = true;
+      video.currentTime = 0;
+      var p = video.play();
+      if (p && p.catch)
+        p.catch(function() {
+        });
+      slide.classList.add("is-playing");
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(function() {
+        var nextIndex = (currentPreview + 1) % videos2.length;
+        var nextSlide = slides[nextIndex];
+        var slideWidth = nextSlide.offsetWidth + 16;
+        var maxScroll = track.scrollWidth - track.clientWidth;
+        var targetScroll = nextSlide.offsetLeft - track.offsetLeft;
+        if (targetScroll > maxScroll || nextIndex === 0) {
+          track.scrollTo({ left: 0, behavior: "smooth" });
+        } else {
+          track.scrollTo({ left: targetScroll, behavior: "smooth" });
+        }
+        setTimeout(function() {
+          playPreview(nextIndex);
+        }, 400);
+      }, previewTime2);
+    }
+    if (window.IntersectionObserver) {
+      observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting) {
+            if (!isManualPause && currentPreview === -1) {
+              playPreview(0);
+            }
+          } else {
+            clearTimeout(previewTimer);
+            if (currentPreview !== -1 && videos2[currentPreview]) {
+              videos2[currentPreview].pause();
+            }
+            currentPreview = -1;
+          }
+        });
+      }, { threshold: 0.3 });
+      observer.observe(root);
+    } else {
+      setTimeout(function() {
+        playPreview(0);
+      }, 500);
+    }
+    videos2.forEach(function(video, index) {
+      var slide = slides[index];
+      var productCards = Array.from(slide.querySelectorAll(".frc-product-card"));
+      if (productCards.length > 0) {
+        video.addEventListener("timeupdate", function() {
+          var ct = video.currentTime;
+          productCards.forEach(function(card) {
+            var start = Number(card.dataset.start);
+            var end = Number(card.dataset.end);
+            if (ct >= start && ct <= end) {
+              if (!card.classList.contains("is-active"))
+                card.classList.add("is-active");
+            } else {
+              if (card.classList.contains("is-active"))
+                card.classList.remove("is-active");
+            }
+          });
+        });
+      }
+      slide.addEventListener("click", function(e) {
+        if (e.target.closest(".frc-product-card"))
+          return;
+        isManualPause = true;
+        clearTimeout(previewTimer);
+        if (video.paused) {
+          videos2.forEach(function(v) {
+            if (v !== video)
+              v.pause();
+          });
+          slides.forEach(function(s) {
+            if (s !== slide)
+              s.classList.remove("is-playing");
+          });
+          video.muted = false;
+          var p = video.play();
+          if (p && p.catch)
+            p.catch(function() {
+            });
+          slide.classList.add("is-playing");
+        } else {
+          video.pause();
+          slide.classList.remove("is-playing");
+        }
+      });
+      video.addEventListener("ended", function() {
+        video.currentTime = 0;
+        if (isManualPause) {
+          var p = video.play();
+          if (p && p.catch)
+            p.catch(function() {
+            });
+          slide.classList.add("is-playing");
+        }
+      });
+    });
+  }
+};
+
 // server/public-script.ts
 var publicScript = `
 (function() {
   var API_ORIGIN = "__API_ORIGIN__";
 
-  function injectStyles() {
-    if (document.getElementById("onstore-frc-styles")) return;
-    var style = document.createElement("style");
-    style.id = "onstore-frc-styles";
-    style.textContent = " \\
-        .fashion-reels-carousel { width: 100%; overflow: hidden; display: flex; justify-content: center; padding: 60px 0; padding-top: 0px; contain: layout paint style; background-color: transparent; } \\
-        .fashion-reels-carousel * { box-sizing: border-box; } \\
-        .fashion-reels-carousel .frc-carousel { position: relative; width: 100%; max-width: 1200px; height: 500px; display: flex; align-items: center; justify-content: center; isolation: isolate; perspective: 1200px; } \\
-        .fashion-reels-carousel .frc-slide { position: absolute; width: auto; height: 100%; aspect-ratio: 9 / 16; border-radius: 24px; overflow: hidden; opacity: 0; transform: translateX(0) scale(.8) rotateY(0deg); transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.6s ease, box-shadow 0.6s ease; will-change: transform, opacity; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: #000; pointer-events: none; box-shadow: 0 10px 30px rgba(0,0,0,0.1); } \\
-        .fashion-reels-carousel .frc-slide video { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; transition: filter 0.6s ease; filter: brightness(0.6); } \\
-        .fashion-reels-carousel .frc-slide.is-center { transform: translateX(0) scale(1) rotateY(0deg); opacity: 1; z-index: 5; pointer-events: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); } \\
-        .fashion-reels-carousel .frc-slide.is-center video { filter: brightness(1); } \\
-        .fashion-reels-carousel .frc-slide.is-left-1 { transform: translateX(-85%) scale(.85) rotateY(12deg); opacity: .8; z-index: 4; } \\
-        .fashion-reels-carousel .frc-slide.is-right-1 { transform: translateX(85%) scale(.85) rotateY(-12deg); opacity: .8; z-index: 4; } \\
-        .fashion-reels-carousel .frc-slide.is-left-2 { transform: translateX(-160%) scale(.7) rotateY(20deg); opacity: .4; z-index: 3; } \\
-        .fashion-reels-carousel .frc-slide.is-right-2 { transform: translateX(160%) scale(.7) rotateY(-20deg); opacity: .4; z-index: 3; } \\
-        .fashion-reels-carousel .frc-slide.is-hidden-left { transform: translateX(-220%) scale(.6) rotateY(25deg); opacity: 0; z-index: 1; } \\
-        .fashion-reels-carousel .frc-slide.is-hidden-right { transform: translateX(220%) scale(.6) rotateY(-25deg); opacity: 0; z-index: 1; } \\
-        @media (max-width: 900px) { .fashion-reels-carousel .frc-carousel { height: 450px; } } \\
-        @media (max-width: 600px) { \\
-            .fashion-reels-carousel { padding: 50px 0; } \\
-            .fashion-reels-carousel .frc-carousel { height: calc(76vw * 16 / 9); max-height: 85vh; min-height: 380px; perspective: 800px; } \\
-            .fashion-reels-carousel .frc-slide { width: 76%; max-width: calc(85vh * 9 / 16); height: auto; aspect-ratio: 9 / 16; border-radius: 18px; } \\
-            .fashion-reels-carousel .frc-slide.is-left-1 { transform: translateX(-65%) scale(.85) rotateY(20deg); opacity: 0.9; } \\
-            .fashion-reels-carousel .frc-slide.is-right-1 { transform: translateX(65%) scale(.85) rotateY(-20deg); opacity: 0.9; } \\
-            .fashion-reels-carousel .frc-slide.is-left-2 { transform: translateX(-110%) scale(.7) rotateY(30deg); opacity: 0.5; } \\
-            .fashion-reels-carousel .frc-slide.is-right-2 { transform: translateX(110%) scale(.7) rotateY(-30deg); opacity: 0.5; } \\
-            .fashion-reels-carousel .frc-slide.is-hidden-left { transform: translateX(-160%) scale(.6) rotateY(35deg); opacity: 0; } \\
-            .fashion-reels-carousel .frc-slide.is-hidden-right { transform: translateX(160%) scale(.6) rotateY(-35deg); opacity: 0; } \\
-        } \\
-        @media (prefers-reduced-motion: reduce) { .fashion-reels-carousel .frc-slide { transition: none; } } \\
-        .fashion-reels-carousel .frc-controls { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 8px; opacity: 0; transition: opacity 0.3s ease; z-index: 10; pointer-events: none; } \\
-        .fashion-reels-carousel .frc-slide.is-center .frc-controls { opacity: 1; pointer-events: auto; } \\
-        .fashion-reels-carousel .frc-btn { background: transparent; border: none; border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: background 0.2s, transform 0.2s; } \\
-        .fashion-reels-carousel .frc-btn:active { transform: scale(0.9); } \\
-        .fashion-reels-carousel .frc-btn:hover { background: rgba(0, 0, 0, 0.7); } \\
-        .fashion-reels-carousel .frc-btn svg { width: 20px; height: 20px; } \\
-    ";
-    document.head.appendChild(style);
-  }
+  function escAttr(s) { return String(s).replace(/"/g,"&quot;"); }
+  var __name = function(n, t) { return n; };
+
+${embedStyles}
+
+${layout3DCard}
+
+${layoutSlider}
 
   function buildCarousel(el, data) {
-    if (!data.carousel.showProducts) { el.style.display = "none"; return; }
-    var originalVideos = data.videos || [];
-    if (!originalVideos.length) return;
-
-    // Pad videos array if less than 6
-    var videos = [];
-    if (originalVideos.length < 6 && originalVideos.length > 0) {
-      var i = 0;
-      while (videos.length < 6) {
-        videos.push(originalVideos[i % originalVideos.length]);
-        i++;
-      }
+    var layout = data.carousel.layout || "3d-card";
+    if (layout === "3d-card") {
+      build3DCard(el, data);
+    } else if (layout === "slider") {
+      buildSlider(el, data);
     } else {
-      videos = originalVideos;
+      console.warn("[Vidshop] Modelo de carrossel n\xE3o suportado:", layout);
     }
-
-    el.classList.add("fashion-reels-carousel");
-    el.setAttribute("data-autoplay", "6000");
-
-    var html = '<div class="frc-carousel">';
-    videos.forEach(function(v) {
-      html += '<div class="frc-slide">';
-      html += '<video muted playsinline loop preload="none" poster="' + (v.thumbnailUrl ? escAttr(v.thumbnailUrl) : '') + '">';
-      html += '<source src="' + escAttr(v.mediaUrl) + '" type="video/mp4">';
-      html += '</video></div>';
-    });
-    html += '</div>';
-
-    el.innerHTML = html;
-    initCarouselLogic(el);
-  }
-
-  function escAttr(s) { return String(s).replace(/"/g,"&quot;"); }
-
-  function initCarouselLogic(root) {
-      if (root.dataset.frcInitialized === "true") return;
-      root.dataset.frcInitialized = "true";
-
-      var slides = Array.from(root.querySelectorAll(".frc-slide"));
-      var videos = slides.map(function(slide) { return slide.querySelector("video"); });
-      var autoplayDelay = Number(root.dataset.autoplay || 6000);
-
-      var current = Math.floor(slides.length / 2);
-      var timer = null;
-      var isVisible = false;
-      var isPageVisible = !document.hidden;
-      var lastCurrent = -1;
-      var isManualPause = false;
-      
-      var touchStartX = 0;
-      var touchEndX = 0;
-
-      function getOffset(index, active, total) {
-          var offset = index - active;
-          if (offset > total / 2) offset -= total;
-          if (offset < -total / 2) offset += total;
-          return offset;
-      }
-
-      function applyClasses() {
-          var total = slides.length;
-          slides.forEach(function(slide, index) {
-              slide.className = "frc-slide";
-              var offset = getOffset(index, current, total);
-              if (offset === 0) slide.classList.add("is-center");
-              else if (offset === -1) slide.classList.add("is-left-1");
-              else if (offset === 1) slide.classList.add("is-right-1");
-              else if (offset === -2) slide.classList.add("is-left-2");
-              else if (offset === 2) slide.classList.add("is-right-2");
-              else if (offset < 0) slide.classList.add("is-hidden-left");
-              else slide.classList.add("is-hidden-right");
-          });
-      }
-
-      function pauseAllVideos() {
-          videos.forEach(function(video) {
-              try { video.pause(); } catch (e) { }
-          });
-      }
-
-      function playCurrentVideo() {
-          if (isManualPause) {
-              pauseAllVideos();
-              return;
-          }
-          videos.forEach(function(video, index) {
-              if (index === current && isVisible && isPageVisible) {
-                  if (lastCurrent !== current) {
-                      try { video.currentTime = 0; } catch (e) { }
-                  }
-                  var playPromise = video.play();
-                  if (playPromise && typeof playPromise.catch === "function") {
-                      playPromise.catch(function() { });
-                  }
-              } else {
-                  try { video.pause(); } catch (e) { }
-              }
-          });
-          lastCurrent = current;
-      }
-
-      function update() {
-          isManualPause = false; // Reset pauser override on slide change
-          applyClasses();
-          playCurrentVideo();
-      }
-
-      function next() {
-          current = (current + 1) % slides.length;
-          update();
-      }
-      
-      function prev() {
-          current = (current - 1 + slides.length) % slides.length;
-          update();
-      }
-
-      function startTimer() {
-          if (timer || !isVisible || !isPageVisible || isManualPause) return;
-          timer = window.setInterval(next, autoplayDelay);
-      }
-
-      function stopTimer() {
-          if (!timer) return;
-          window.clearInterval(timer);
-          timer = null;
-      }
-      
-      function resetTimer() {
-          stopTimer();
-          startTimer();
-      }
-
-      if (window.IntersectionObserver) {
-          var observer = new IntersectionObserver(function(entries) {
-              entries.forEach(function(entry) {
-                  isVisible = entry.isIntersecting && entry.intersectionRatio > 0.2;
-                  if (isVisible) {
-                      if (!isManualPause) {
-                          update();
-                          startTimer();
-                      }
-                  } else {
-                      stopTimer();
-                      pauseAllVideos();
-                  }
-              });
-          }, { threshold: [0, 0.2, 0.6] });
-          observer.observe(root);
-      } else {
-          isVisible = true; // Fallback
-      }
-
-      document.addEventListener("visibilitychange", function() {
-          isPageVisible = !document.hidden;
-          if (isPageVisible && isVisible) {
-              if (!isManualPause) {
-                  playCurrentVideo();
-                  startTimer();
-              }
-          } else {
-              stopTimer();
-              pauseAllVideos();
-          }
-      });
-
-      var touchStartY = 0;
-      var isSwipingHorizontal = null;
-
-      root.addEventListener('touchstart', function(e) {
-          touchStartX = e.changedTouches[0].screenX;
-          touchStartY = e.changedTouches[0].screenY;
-          isSwipingHorizontal = null;
-          root.dataset.isDragging = "true";
-      }, { passive: true });
-
-      root.addEventListener('touchmove', function(e) {
-          if (!root.dataset.isDragging) return;
-          var touchCurrentX = e.changedTouches[0].screenX;
-          var touchCurrentY = e.changedTouches[0].screenY;
-          var dx = Math.abs(touchCurrentX - touchStartX);
-          var dy = Math.abs(touchCurrentY - touchStartY);
-          if (isSwipingHorizontal === null) {
-              if (dx > dy && dx > 5) isSwipingHorizontal = true;
-              else if (dy > dx && dy > 5) isSwipingHorizontal = false;
-          }
-          if (isSwipingHorizontal) {
-              if (e.cancelable) e.preventDefault();
-          }
-      }, { passive: false });
-
-      root.addEventListener('touchend', function(e) {
-          root.dataset.isDragging = "";
-          if (isSwipingHorizontal === false) return;
-          
-          touchEndX = e.changedTouches[0].screenX;
-          var swipeThreshold = 40;
-          if (touchEndX < touchStartX - swipeThreshold) {
-              next();
-              resetTimer();
-          } else if (touchEndX > touchStartX + swipeThreshold) {
-              prev();
-              resetTimer();
-          }
-      }, { passive: true });
-
-      var isDragging = false;
-      var mouseStart = 0;
-      root.addEventListener('mousedown', function(e) {
-          isDragging = true;
-          mouseStart = e.screenX;
-      });
-      
-      root.addEventListener('mouseup', function(e) {
-          if (!isDragging) return;
-          isDragging = false;
-          var touchEnd = e.screenX;
-          var swipeThreshold = 40;
-          if (touchEnd < mouseStart - swipeThreshold) {
-              next();
-              resetTimer();
-          } else if (touchEnd > mouseStart + swipeThreshold) {
-              prev();
-              resetTimer();
-          }
-          root.dataset.lastDragDist = Math.abs(touchEnd - mouseStart);
-          setTimeout(function() { root.dataset.lastDragDist = '0'; }, 50);
-      });
-      
-      root.addEventListener('mouseleave', function() {
-          isDragging = false;
-      });
-
-      videos.forEach(function(video, index) {
-          video.muted = true;
-          video.addEventListener('play', function() {
-              var slide = slides[index];
-              var playBtn = slide.querySelector('.frc-play-btn');
-              if (playBtn) {
-                  playBtn.querySelector('.icon-pause').style.display = 'block';
-                  playBtn.querySelector('.icon-play').style.display = 'none';
-              }
-          });
-          video.addEventListener('pause', function() {
-              var slide = slides[index];
-              var playBtn = slide.querySelector('.frc-play-btn');
-              if (playBtn) {
-                  playBtn.querySelector('.icon-pause').style.display = 'none';
-                  playBtn.querySelector('.icon-play').style.display = 'block';
-              }
-          });
-          video.addEventListener('volumechange', function() {
-              var slide = slides[index];
-              var muteBtn = slide.querySelector('.frc-mute-btn');
-              if (muteBtn) {
-                  muteBtn.querySelector('.icon-mute').style.display = video.muted ? 'block' : 'none';
-                  muteBtn.querySelector('.icon-unmute').style.display = video.muted ? 'none' : 'block';
-              }
-          });
-      });
-
-      slides.forEach(function(slide, index) {
-          var controls = document.createElement('div');
-          controls.className = 'frc-controls';
-          controls.innerHTML = [
-            '<button class="frc-btn frc-mute-btn" aria-label="Mute/Unmute">',
-            '    <svg class="icon-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>',
-            '    <svg class="icon-unmute" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>',
-            '</button>',
-            '<button class="frc-btn frc-play-btn" aria-label="Play/Pause">',
-            '    <svg class="icon-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>',
-            '    <svg class="icon-play" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>',
-            '</button>'
-          ].join("");
-          slide.appendChild(controls);
-
-          var video = videos[index];
-          var muteBtn = controls.querySelector('.frc-mute-btn');
-          var playBtn = controls.querySelector('.frc-play-btn');
-
-          muteBtn.addEventListener('click', function(e) {
-              e.stopPropagation(); // prevent triggering the slide click
-              var setMuted = !video.muted;
-              videos.forEach(function(v) { v.muted = setMuted; });
-          });
-
-          playBtn.addEventListener('click', function(e) {
-              e.stopPropagation();
-              if (video.paused) {
-                  isManualPause = false;
-                  video.play();
-                  startTimer();
-              } else {
-                  isManualPause = true;
-                  video.pause();
-                  stopTimer();
-              }
-          });
-          
-          slide.addEventListener("click", function(e) {
-              if (Number(root.dataset.lastDragDist) > 40) return;
-              if (index === current) {
-                  // Toggle audio if center slide clicked
-                  var setMuted = !video.muted;
-                  videos.forEach(function(v) { v.muted = setMuted; });
-              } else {
-                  current = index;
-                  update();
-                  resetTimer();
-              }
-          });
-      });
-
-      update();
   }
 
   function init() {
     injectStyles();
-    var els = document.querySelectorAll("[data-onstore-carousel]");
+    var els = document.querySelectorAll("[data-vidshop-carousel], [data-onstore-carousel]");
     els.forEach(function(el) {
-      var cid = el.getAttribute("data-onstore-carousel");
-      if (!cid || el.dataset.onstoreLoaded) return;
-      el.dataset.onstoreLoaded = "1";
+      var cid = el.getAttribute("data-vidshop-carousel") || el.getAttribute("data-onstore-carousel");
+      if (!cid || el.dataset.vidshopLoaded) return;
+      el.dataset.vidshopLoaded = "1";
       fetch(API_ORIGIN + "/api/public/carousels/" + cid)
         .then(function(r) { return r.json(); })
         .then(function(data) { buildCarousel(el, data); })
-        .catch(function(e) { console.warn("[onstore] Erro carrossel #" + cid, e); });
+        .catch(function(e) { console.warn("[Vidshop] Erro carrossel #" + cid, e); });
     });
   }
 
@@ -789,6 +1000,36 @@ var publicScript = `
   }
 })();
 `;
+
+// server/cloudflare-purge.ts
+async function purgeCloudflareCache(urls) {
+  if (!urls.length)
+    return;
+  const zoneId = process.env.CLOUDFLARE_ZONE_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!zoneId || !token) {
+    console.warn("Cloudflare purge skipped: CLOUDFLARE_ZONE_ID or CLOUDFLARE_API_TOKEN not set in .env");
+    return;
+  }
+  try {
+    const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ files: urls })
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      console.error("Cloudflare purge error:", data);
+    } else {
+      console.log("Cloudflare cache purged for:", urls);
+    }
+  } catch (e) {
+    console.error("Cloudflare purge request failed:", e);
+  }
+}
 
 // server/routes.ts
 var JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
@@ -984,6 +1225,7 @@ function registerRoutes(app2) {
   app2.get("/api/public/carousels/:id", async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET");
+    res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=86400");
     try {
       const carouselId = parseInt(req.params.id);
       if (isNaN(carouselId))
@@ -1002,7 +1244,32 @@ function registerRoutes(app2) {
           thumbnailUrl: shoppableVideos.thumbnailUrl
         }
       }).from(carouselVideos).innerJoin(shoppableVideos, eq3(carouselVideos.videoId, shoppableVideos.id)).where(eq3(carouselVideos.carouselId, carouselId)).orderBy(carouselVideos.position);
-      res.json({ carousel, videos: cv.map((r) => r.video) });
+      const videoIds = cv.map((r) => r.videoId);
+      let productsByVideo = {};
+      if (carousel.showProducts && videoIds.length > 0) {
+        const vp = await db.select({
+          videoId: videoProducts.videoId,
+          startTime: videoProducts.startTime,
+          endTime: videoProducts.endTime,
+          product: {
+            id: products.id,
+            title: products.title,
+            price: products.price,
+            imageLink: products.imageLink,
+            link: products.link
+          }
+        }).from(videoProducts).innerJoin(products, eq3(videoProducts.productId, products.id)).where(inArray(videoProducts.videoId, videoIds)).orderBy(videoProducts.startTime);
+        vp.forEach((record) => {
+          if (!productsByVideo[record.videoId])
+            productsByVideo[record.videoId] = [];
+          productsByVideo[record.videoId].push({
+            startTime: record.startTime,
+            endTime: record.endTime,
+            ...record.product
+          });
+        });
+      }
+      res.json({ carousel, videos: cv.map((r) => ({ ...r.video, productsList: productsByVideo[r.videoId] || [] })) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -1010,7 +1277,7 @@ function registerRoutes(app2) {
   app2.get("/embed/carousel.js", (_req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/javascript");
-    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     const origin = process.env.PUBLIC_URL || "";
     res.send(publicScript.replace("__API_ORIGIN__", origin));
   });
@@ -1039,12 +1306,16 @@ function registerRoutes(app2) {
   });
   app2.post("/api/carousels", authMiddleware, async (req, res) => {
     try {
-      const { name, title, description, showProducts } = req.body;
+      const { name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime } = req.body;
       const [carousel] = await db.insert(videoCarousels).values({
         name: name || "Novo Carrossel",
         title,
-        description,
-        showProducts: showProducts ?? true
+        subtitle,
+        titleColor: titleColor || "#000000",
+        subtitleColor: subtitleColor || "#666666",
+        layout: layout || "3d-card",
+        showProducts: showProducts ?? true,
+        previewTime: previewTime ?? 3
       }).returning();
       res.status(201).json({ carousel });
     } catch (e) {
@@ -1053,9 +1324,9 @@ function registerRoutes(app2) {
   });
   app2.put("/api/carousels/:id", authMiddleware, async (req, res) => {
     const carouselId = parseInt(req.params.id);
-    const { name, title, description, showProducts, videoIds } = req.body;
+    const { name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime, videoIds } = req.body;
     try {
-      const [updated] = await db.update(videoCarousels).set({ name, title, description, showProducts, updatedAt: /* @__PURE__ */ new Date() }).where(eq3(videoCarousels.id, carouselId)).returning();
+      const [updated] = await db.update(videoCarousels).set({ name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime, updatedAt: /* @__PURE__ */ new Date() }).where(eq3(videoCarousels.id, carouselId)).returning();
       if (!updated)
         return res.status(404).json({ error: "Carrossel n\xE3o encontrado" });
       if (videoIds && Array.isArray(videoIds)) {
@@ -1070,6 +1341,8 @@ function registerRoutes(app2) {
           );
         }
       }
+      const publicUrl = process.env.PUBLIC_URL || "http://localhost:5000";
+      purgeCloudflareCache([`${publicUrl}/api/public/carousels/${carouselId}`]);
       res.json({ carousel: updated });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -1077,6 +1350,8 @@ function registerRoutes(app2) {
   });
   app2.delete("/api/carousels/:id", authMiddleware, async (req, res) => {
     await db.delete(videoCarousels).where(eq3(videoCarousels.id, parseInt(req.params.id)));
+    const publicUrl = process.env.PUBLIC_URL || "http://localhost:5000";
+    purgeCloudflareCache([`${publicUrl}/api/public/carousels/${parseInt(req.params.id)}`]);
     res.sendStatus(204);
   });
   app2.get("/api/videos", authMiddleware, async (_req, res) => {
@@ -1130,6 +1405,12 @@ function registerRoutes(app2) {
           }));
           await db.insert(videoProducts).values(insertData);
         }
+      }
+      const publicUrl = process.env.PUBLIC_URL || "http://localhost:5000";
+      const impactedCarousels = await db.select({ carouselId: carouselVideos.carouselId }).from(carouselVideos).where(eq3(carouselVideos.videoId, videoId));
+      if (impactedCarousels.length > 0) {
+        const urls = impactedCarousels.map((c) => `${publicUrl}/api/public/carousels/${c.carouselId}`);
+        purgeCloudflareCache(urls);
       }
       res.json({ video: updated });
     } catch (e) {

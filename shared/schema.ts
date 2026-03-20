@@ -100,6 +100,7 @@ export const videoCarousels = pgTable("video_carousels", {
   subtitleColor: text("subtitle_color").notNull().default("#666666"),
   layout: text("layout").notNull().default("3d-card"),
   showProducts: boolean("show_products").notNull().default(true),
+  previewTime: integer("preview_time").notNull().default(3),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

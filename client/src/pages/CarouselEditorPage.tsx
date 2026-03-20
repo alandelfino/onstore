@@ -34,6 +34,10 @@ export default function CarouselEditorPage() {
   const [subtitleColor, setSubtitleColor] = useState("#666666");
   const [layout, setLayout] = useState("3d-card");
   const [showProducts, setShowProducts] = useState(true);
+  
+  // Slider specific settings
+  const [previewTime, setPreviewTime] = useState(3);
+
   const [videoList, setVideoList] = useState<CarouselVideoEntry[]>([]);
 
   // Search state
@@ -62,6 +66,7 @@ export default function CarouselEditorPage() {
         setSubtitleColor(data.carousel.subtitleColor || "#666666");
         setLayout(data.carousel.layout || "3d-card");
         setShowProducts(data.carousel.showProducts ?? true);
+        setPreviewTime(data.carousel.previewTime ?? 3);
         setVideoList((data.videos || []).map((v: any) => ({
           videoId: v.videoId,
           video: v.video
@@ -119,6 +124,7 @@ export default function CarouselEditorPage() {
       const token = localStorage.getItem("token");
       const payload = {
         name, title, subtitle, titleColor, subtitleColor, layout, showProducts,
+        previewTime,
         videoIds: videoList.map(e => e.videoId)
       };
 
@@ -126,7 +132,7 @@ export default function CarouselEditorPage() {
         const createRes = await fetch("/api/carousels", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ name, title, subtitle, titleColor, subtitleColor, layout, showProducts })
+          body: JSON.stringify({ name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime })
         });
         if (!createRes.ok) throw new Error("Erro ao criar carrossel");
         const created = await createRes.json();
@@ -272,6 +278,26 @@ export default function CarouselEditorPage() {
                   <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform ${showProducts ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </div>
               </button>
+
+              {layout === "slider" && (
+                <div className="space-y-4 pt-4 border-t border-border">
+                  <h3 className="text-xs font-bold uppercase text-muted-foreground">Configurações do Slider</h3>
+
+                  <div>
+                    <label className="text-xs font-semibold uppercase text-muted-foreground block mb-1.5">Tempo de Preview (Segundos)</label>
+                    <select
+                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      value={previewTime}
+                      onChange={e => setPreviewTime(Number(e.target.value))}
+                    >
+                      {[3, 4, 5, 6, 7, 8].map(num => (
+                        <option key={num} value={num}>{num} Segundos</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground mt-1">Tempo de reprodução do vídeo antes de dar auto-play no próximo (3 a 8 seg).</p>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

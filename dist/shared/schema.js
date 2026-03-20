@@ -1,0 +1,85 @@
+import { pgTable, serial, text, integer, timestamp, boolean } from "drizzle-orm/pg-core";
+export const users = pgTable("users", {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export const media = pgTable("media", {
+    id: serial("id").primaryKey(),
+    filename: text("filename").notNull().unique(), // UUID gerado no servidor
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    size: integer("size").notNull(), // bytes
+    url: text("url").notNull(), // /uploads/<filename>
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export const products = pgTable("products", {
+    id: serial("id").primaryKey(),
+    externalId: text("external_id").notNull().unique(), // g:id
+    title: text("title").notNull(), // g:title
+    description: text("description"), // g:description
+    price: text("price"), // g:price
+    imageLink: text("image_link"), // g:image_link
+    link: text("link"), // g:link
+    brand: text("brand"), // g:brand
+    availability: text("availability"), // g:availability
+    condition: text("condition"), // g:condition
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export const catalogImports = pgTable("catalog_imports", {
+    id: serial("id").primaryKey(),
+    sourceType: text("source_type").notNull(), // 'file', 'url'
+    sourceUrl: text("source_url"),
+    status: text("status").notNull().default("pending"), // pending, processing, completed, failed
+    processedItems: integer("processed_items").notNull().default(0),
+    error: text("error"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at"),
+});
+export const catalogSyncs = pgTable("catalog_syncs", {
+    id: serial("id").primaryKey(),
+    url: text("url").notNull(),
+    frequencyDays: integer("frequency_days").notNull(),
+    syncTime: text("sync_time").notNull(),
+    nextSyncAt: timestamp("next_sync_at").notNull(),
+    lastSyncAt: timestamp("last_sync_at"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export const shoppableVideos = pgTable("shoppable_videos", {
+    id: serial("id").primaryKey(),
+    mediaUrl: text("media_url").notNull(),
+    thumbnailUrl: text("thumbnail_url"),
+    title: text("title").notNull(),
+    description: text("description"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export const videoProducts = pgTable("video_products", {
+    id: serial("id").primaryKey(),
+    videoId: integer("video_id").references(() => shoppableVideos.id, { onDelete: 'cascade' }).notNull(),
+    productId: integer("product_id").references(() => products.id, { onDelete: 'cascade' }).notNull(),
+    startTime: integer("start_time").notNull(), // in seconds
+    endTime: integer("end_time").notNull(), // in seconds
+});
+export const videoCarousels = pgTable("video_carousels", {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    title: text("title"),
+    subtitle: text("subtitle"),
+    titleColor: text("title_color").notNull().default("#000000"),
+    subtitleColor: text("subtitle_color").notNull().default("#666666"),
+    layout: text("layout").notNull().default("3d-card"),
+    showProducts: boolean("show_products").notNull().default(true),
+    previewTime: integer("preview_time").notNull().default(3),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export const carouselVideos = pgTable("carousel_videos", {
+    id: serial("id").primaryKey(),
+    carouselId: integer("carousel_id").references(() => videoCarousels.id, { onDelete: 'cascade' }).notNull(),
+    videoId: integer("video_id").references(() => shoppableVideos.id, { onDelete: 'cascade' }).notNull(),
+    position: integer("position").notNull().default(0),
+});

@@ -1,7 +1,6 @@
 import { embedStyles } from "./embed/styles.js";
 import { layout3DCard } from "./embed/layout-3d-card.js";
 import { layoutSlider } from "./embed/layout-slider.js";
-
 export const publicScript = `
 (function() {
   var API_ORIGIN = "__API_ORIGIN__";
