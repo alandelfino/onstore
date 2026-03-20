@@ -8,6 +8,7 @@
     "start": "cross-env NODE_ENV=production node dist/server/index.js",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
+    "db:mig": "drizzle-kit generate && drizzle-kit migrate",
     "git": "git add . && git commit -m 'dev' && git push origin main"
   },
   "dependencies": {
