@@ -13,6 +13,8 @@ import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import { publicScript } from "./public-script.js";
 import { purgeCloudflareCache } from "./cloudflare-purge.js";
+import { stripe, PLANS, PlanId } from "./stripe.js";
+import { shouldCountView } from "./view-tracker.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 
@@ -156,7 +158,10 @@ export function registerRoutes(app: Express) {
     app.get("/api/auth/me", authMiddleware, async (req: Request, res: Response) => {
         const payload = (req as any).user as JwtPayload;
         const [user] = await db
-            .select({ id: users.id, name: users.name, email: users.email, createdAt: users.createdAt })
+            .select({ 
+                id: users.id, name: users.name, email: users.email, createdAt: users.createdAt,
+                subscriptionStatus: users.subscriptionStatus 
+            })
             .from(users)
             .where(eq(users.id, payload.userId))
             .limit(1);
@@ -179,10 +184,10 @@ export function registerRoutes(app: Express) {
 
     app.post("/api/stores", authMiddleware, async (req: Request, res: Response) => {
         const payload = (req as any).user as JwtPayload;
-        const { name, allowedDomain } = req.body;
-        if (!name) return res.status(400).json({ error: "Nome da loja é obrigatório" });
+        const { name, allowedDomain, plan } = req.body;
+        if (!name || !allowedDomain) return res.status(400).json({ error: "Nome da loja e domínio são obrigatórios" });
         
-        const [store] = await db.insert(stores).values({ name, allowedDomain, ownerId: payload.userId }).returning();
+        const [store] = await db.insert(stores).values({ name, allowedDomain, plan: plan || "free", ownerId: payload.userId }).returning();
         res.status(201).json({ store });
     });
 
@@ -191,6 +196,8 @@ export function registerRoutes(app: Express) {
         const storeId = parseInt(req.params.id);
         const { name, allowedDomain } = req.body;
         
+        if (!name || !allowedDomain) return res.status(400).json({ error: "Nome da loja e domínio são obrigatórios" });
+
         // Ensure user owns store
         const [existing] = await db.select().from(stores).where(and(eq(stores.id, storeId), eq(stores.ownerId, payload.userId))).limit(1);
         if (!existing) return res.status(404).json({ error: "Loja não encontrada ou acesso negado." });
@@ -411,7 +418,8 @@ export function registerRoutes(app: Express) {
     app.get("/api/public/carousels/:id", async (req: Request, res: Response) => {
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Access-Control-Allow-Methods", "GET");
-        res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=86400");
+        // No heavy CDN caching so the view limit check always runs
+        res.setHeader("Cache-Control", "no-store");
         try {
             const carouselId = parseInt(req.params.id);
             if (isNaN(carouselId)) return res.status(400).json({ error: "ID inválido" });
@@ -419,16 +427,30 @@ export function registerRoutes(app: Express) {
             const [carousel] = await db.select().from(videoCarousels).where(eq(videoCarousels.id, carouselId));
             if (!carousel) return res.status(404).json({ error: "Carrossel não encontrado" });
 
+            // ── Domain and limit check (BEFORE we do any heavy work) ───────────
+            let targetStore: typeof stores.$inferSelect | null = null;
             if (carousel.storeId) {
                 const [store] = await db.select().from(stores).where(eq(stores.id, carousel.storeId));
-                if (store && store.allowedDomain) {
-                    const origin = req.headers.origin || req.headers.referer;
-                    if (origin && !origin.includes(store.allowedDomain)) {
-                        return res.status(403).json({ error: "Domínio não autorizado para este carrossel." });
+                if (store) {
+                    if (store.allowedDomain) {
+                        const origin = req.headers.origin || req.headers.referer;
+                        if (origin && !origin.includes(store.allowedDomain)) {
+                            return res.status(403).json({ error: "Domínio não autorizado para este carrossel." });
+                        }
                     }
+
+                    const planId = store.plan as PlanId;
+                    const limits = PLANS[planId] || PLANS.free;
+
+                    if (store.currentCycleViews >= limits.maxViews) {
+                        return res.status(403).json({ error: "Cota mensal de visualizações da loja excedida. O conteúdo está bloqueado até o upgrade do plano." });
+                    }
+
+                    targetStore = store;
                 }
             }
 
+            // ── Fetch carousel data ────────────────────────────────────────────
             const cv = await db.select({
                 videoId: carouselVideos.videoId,
                 position: carouselVideos.position,
@@ -476,7 +498,20 @@ export function registerRoutes(app: Express) {
                 });
             }
 
+            // ── Send the response FIRST (zero extra latency for the visitor) ──
             res.json({ carousel, videos: cv.map(r => ({ ...r.video, productsList: productsByVideo[r.videoId] || [] })) });
+
+            // ── Non-blocking view count increment (happens AFTER response) ────
+            if (targetStore) {
+                const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+                if (shouldCountView(carouselId, ip)) {
+                    // Fire-and-forget: do NOT await so it never blocks anything
+                    db.update(stores)
+                        .set({ currentCycleViews: sql`${stores.currentCycleViews} + 1` })
+                        .where(eq(stores.id, targetStore.id))
+                        .catch(err => console.error("[view-tracker] DB increment failed:", err));
+                }
+            }
         } catch (e: any) {
             res.status(500).json({ error: e.message });
         }
@@ -525,12 +560,54 @@ export function registerRoutes(app: Express) {
             .where(eq(carouselVideos.carouselId, carouselId))
             .orderBy(carouselVideos.position);
 
-        res.json({ carousel, videos: cv });
+        const videoIds = cv.map(r => r.videoId);
+        let productsByVideo: Record<number, any[]> = {};
+        
+        if (videoIds.length > 0) {
+            const vp = await db.select({
+                videoId: videoProducts.videoId,
+                startTime: videoProducts.startTime,
+                endTime: videoProducts.endTime,
+                product: {
+                    id: products.id, title: products.title, price: products.price, imageLink: products.imageLink, link: products.link
+                }
+            })
+                .from(videoProducts)
+                .innerJoin(products, eq(videoProducts.productId, products.id))
+                .where(inArray(videoProducts.videoId, videoIds))
+                .orderBy(videoProducts.startTime);
+
+            vp.forEach(record => {
+                if (!productsByVideo[record.videoId]) productsByVideo[record.videoId] = [];
+                productsByVideo[record.videoId].push({
+                    startTime: record.startTime,
+                    endTime: record.endTime,
+                    ...record.product
+                });
+            });
+        }
+
+        res.json({ carousel, videos: cv.map(r => ({ ...r, video: { ...r.video, productsList: productsByVideo[r.videoId] || [] } })) });
     });
 
     app.post("/api/carousels", authMiddleware, async (req: Request, res: Response) => {
         try {
             const storeId = getStoreId(req);
+            const payload = (req as any).user;
+            
+            // Verificação de Limites do Plano da Loja
+            const [activeStore] = await db.select().from(stores).where(and(eq(stores.id, storeId), eq(stores.ownerId, payload.userId)));
+            if (!activeStore) return res.status(403).json({ error: "Loja não encontrada ou acesso negado." });
+            const planId = activeStore.plan as PlanId;
+            const limits = PLANS[planId] || PLANS.free;
+            
+            const [countRes] = await db.select({ count: sql`count(*)`.mapWith(Number) }).from(videoCarousels).where(eq(videoCarousels.storeId, storeId));
+            const count = countRes.count;
+
+            if (count >= limits.maxCarousels) {
+                return res.status(403).json({ error: `Limite atingido. Você pode criar até ${limits.maxCarousels} carrossel(eis) no plano ${limits.name}. Faça o upgrade para expandir.` });
+            }
+
             const { name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime } = req.body;
             const [carousel] = await db.insert(videoCarousels).values({
                 storeId,
@@ -595,7 +672,35 @@ export function registerRoutes(app: Express) {
     app.get("/api/videos", authMiddleware, async (req: Request, res: Response) => {
         const storeId = getStoreId(req);
         const list = await db.select().from(shoppableVideos).where(eq(shoppableVideos.storeId, storeId)).orderBy(desc(shoppableVideos.createdAt));
-        res.json({ videos: list });
+        
+        const videoIds = list.map(v => v.id);
+        let productsByVideo: Record<number, any[]> = {};
+        
+        if (videoIds.length > 0) {
+            const vp = await db.select({
+                videoId: videoProducts.videoId,
+                startTime: videoProducts.startTime,
+                endTime: videoProducts.endTime,
+                product: {
+                    id: products.id, title: products.title, price: products.price, imageLink: products.imageLink, link: products.link
+                }
+            })
+                .from(videoProducts)
+                .innerJoin(products, eq(videoProducts.productId, products.id))
+                .where(inArray(videoProducts.videoId, videoIds))
+                .orderBy(videoProducts.startTime);
+
+            vp.forEach(record => {
+                if (!productsByVideo[record.videoId]) productsByVideo[record.videoId] = [];
+                productsByVideo[record.videoId].push({
+                    startTime: record.startTime,
+                    endTime: record.endTime,
+                    ...record.product
+                });
+            });
+        }
+
+        res.json({ videos: list.map(v => ({...v, productsList: productsByVideo[v.id] || []})) });
     });
 
     app.get("/api/videos/:id", authMiddleware, async (req: Request, res: Response) => {
@@ -628,6 +733,21 @@ export function registerRoutes(app: Express) {
     app.post("/api/videos", authMiddleware, async (req: Request, res: Response) => {
         try {
             const storeId = getStoreId(req);
+            const payload = (req as any).user;
+            
+            // Verificação de Limites do Plano da Loja
+            const [activeStore] = await db.select().from(stores).where(and(eq(stores.id, storeId), eq(stores.ownerId, payload.userId)));
+            if (!activeStore) return res.status(403).json({ error: "Loja não encontrada ou acesso negado." });
+            const planId = activeStore.plan as PlanId;
+            const limits = PLANS[planId] || PLANS.free;
+            
+            const [countRes] = await db.select({ count: sql`count(*)`.mapWith(Number) }).from(shoppableVideos).where(eq(shoppableVideos.storeId, storeId));
+            const count = countRes.count;
+
+            if (count >= limits.maxVideos) {
+                return res.status(403).json({ error: `Limite atingido. Você pode estocar até ${limits.maxVideos} vídeo(s) no plano ${limits.name}. Faça o upgrade para expandir.` });
+            }
+
             const { title, description, mediaUrl, thumbnailUrl } = req.body;
             const [video] = await db.insert(shoppableVideos).values({ storeId, title: title || "Novo Vídeo", description, mediaUrl, thumbnailUrl }).returning();
             res.status(201).json({ video });
@@ -745,6 +865,167 @@ export function registerRoutes(app: Express) {
         }
 
         res.json({ product: updated });
+    });
+
+    app.delete("/api/products/:id", authMiddleware, async (req: Request, res: Response) => {
+        const storeId = getStoreId(req);
+        const id = parseInt(req.params.id);
+        if (isNaN(id)) {
+            res.status(400).json({ error: "ID inválido" });
+            return;
+        }
+
+        const [deleted] = await db.delete(products).where(and(eq(products.id, id), eq(products.storeId, storeId))).returning();
+        if (!deleted) {
+            res.status(404).json({ error: "Produto não encontrado" });
+            return;
+        }
+        res.json({ success: true });
+    });
+
+    // ── Stripe Billing Endpoints ──────────────────────────────────────────────
+
+    // POST /api/stripe/checkout
+    // Body: { planId: "pro" | "ultra" | "gold", storeId: number }
+    app.post("/api/stripe/checkout", authMiddleware, async (req: Request, res: Response) => {
+        const payload = (req as any).user;
+        const { planId, storeId } = req.body;
+
+        if (!planId || !PLANS[planId as PlanId]) return res.status(400).json({ error: "Plano inválido" });
+
+        const plan = PLANS[planId as PlanId];
+        if (plan.price === 0) return res.status(400).json({ error: "Plano gratuito não requer checkout." });
+
+        // Validate store belongs to this user
+        const [store] = await db.select().from(stores).where(and(eq(stores.id, storeId), eq(stores.ownerId, payload.userId))).limit(1);
+        if (!store) return res.status(403).json({ error: "Loja não encontrada ou acesso negado." });
+
+        try {
+            const [owner] = await db.select().from(users).where(eq(users.id, payload.userId)).limit(1);
+            let customerId = owner.stripeCustomerId;
+
+            if (!customerId) {
+                const customer = await stripe.customers.create({ email: owner.email, name: owner.name });
+                customerId = customer.id;
+                await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, owner.id));
+            }
+
+            const publicUrl = process.env.PUBLIC_URL || "http://localhost:5000";
+
+            const session = await stripe.checkout.sessions.create({
+                customer: customerId,
+                payment_method_types: ["card"],
+                line_items: [{ price: (plan as any).priceId, quantity: 1 }],
+                mode: "subscription",
+                success_url: `${publicUrl}/dashboard/billing?success=true`,
+                cancel_url: `${publicUrl}/dashboard/billing?canceled=true`,
+                // Pass both storeId and planId so the webhook knows what to update
+                metadata: { storeId: storeId.toString(), planId, userId: owner.id.toString() },
+            });
+
+            res.json({ url: session.url });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // POST /api/stripe/portal  – scoped to the active store's Stripe customer
+    app.post("/api/stripe/portal", authMiddleware, async (req: Request, res: Response) => {
+        const payload = (req as any).user;
+        const [owner] = await db.select().from(users).where(eq(users.id, payload.userId)).limit(1);
+
+        if (!owner.stripeCustomerId) return res.status(400).json({ error: "Conta Stripe não configurada para este usuário." });
+
+        try {
+            const publicUrl = process.env.PUBLIC_URL || "http://localhost:5000";
+            const session = await stripe.billingPortal.sessions.create({
+                customer: owner.stripeCustomerId,
+                return_url: `${publicUrl}/dashboard/billing`,
+            });
+            res.json({ url: session.url });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // POST /api/stripe/webhook  – must be raw body for signature verification
+    app.post("/api/stripe/webhook", async (req: Request, res: Response) => {
+        const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+        let event;
+
+        if (webhookSecret) {
+            const sig = req.headers["stripe-signature"] as string;
+            try {
+                event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+            } catch (err: any) {
+                console.error("[webhook] Signature verification failed:", err.message);
+                return res.status(400).json({ error: `Webhook signature failed: ${err.message}` });
+            }
+        } else {
+            // Dev fallback (no signature check)
+            event = req.body;
+        }
+
+        try {
+            // ── Payment succeeded: activate the plan on the store ──────────────
+            if (event.type === "checkout.session.completed") {
+                const session = event.data.object;
+                const storeId = parseInt(session.metadata?.storeId || "0");
+                const planId = session.metadata?.planId as PlanId;
+                const userId = parseInt(session.metadata?.userId || "0");
+
+                if (storeId && planId) {
+                    await db.update(stores).set({
+                        plan: planId,
+                        currentCycleViews: 0,
+                    }).where(eq(stores.id, storeId));
+                }
+
+                if (userId && session.subscription) {
+                    await db.update(users).set({
+                        stripeSubscriptionId: session.subscription,
+                        subscriptionStatus: "active",
+                    }).where(eq(users.id, userId));
+                }
+            }
+
+            // ── Renewal: reset view counter for the new billing cycle ──────────
+            else if (event.type === "invoice.payment_succeeded") {
+                const invoice = event.data.object;
+                if (invoice.subscription) {
+                    // Find user by subscription id
+                    const [userRow] = await db.select().from(users).where(eq(users.stripeSubscriptionId, invoice.subscription)).limit(1);
+                    if (userRow) {
+                        await db.update(users).set({ subscriptionStatus: "active" }).where(eq(users.id, userRow.id));
+                        // Reset cycle views for ALL stores of this user
+                        await db.update(stores).set({ currentCycleViews: 0 }).where(eq(stores.ownerId, userRow.id));
+                    }
+                }
+            }
+
+            // ── Subscription cancelled/deleted: downgrade store to free ────────
+            else if (
+                event.type === "customer.subscription.deleted" ||
+                event.type === "customer.subscription.updated"
+            ) {
+                const subscription = event.data.object;
+                // Only downgrade if status is actually canceled/unpaid
+                const isCanceled = ["canceled", "unpaid", "incomplete_expired"].includes(subscription.status);
+                if (isCanceled) {
+                    const [userRow] = await db.select().from(users).where(eq(users.stripeSubscriptionId, subscription.id)).limit(1);
+                    if (userRow) {
+                        await db.update(users).set({ subscriptionStatus: "canceled", stripeSubscriptionId: null }).where(eq(users.id, userRow.id));
+                        // Downgrade all stores owned by this user to free
+                        await db.update(stores).set({ plan: "free" }).where(eq(stores.ownerId, userRow.id));
+                    }
+                }
+            }
+
+            res.json({ received: true });
+        } catch (e: any) {
+            console.error("[webhook] Processing failed:", e);
+            res.status(500).json({ error: e.message });
+        }
     });
 
     app.delete("/api/products/:id", authMiddleware, async (req: Request, res: Response) => {

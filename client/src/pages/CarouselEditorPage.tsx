@@ -2,7 +2,7 @@ import { apiFetch } from "@/lib/api";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Loader2, Save, Plus, Search, X, Eye, EyeOff, GripVertical, Video, Code2, Copy, Check, Monitor, Tablet, Smartphone
+  ArrowLeft, Loader2, Save, Plus, Search, X, Eye, EyeOff, GripVertical, Video, Code2, Copy, Check, Monitor, Tablet, Smartphone, ZoomIn, ZoomOut, RotateCcw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,7 @@ interface ShoppableVideo {
   description: string | null;
   mediaUrl: string;
   thumbnailUrl?: string | null;
+  productsList?: any[];
 }
 
 interface CarouselVideoEntry {
@@ -450,11 +451,12 @@ export default function CarouselEditorPage() {
 
 function LivePreviewSection({ id, name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime, videoList, onClose }: { id: string | undefined, name: string, title: string, subtitle: string, titleColor: string, subtitleColor: string, layout: string, showProducts: boolean, previewTime: number, videoList: CarouselVideoEntry[], onClose?: () => void }) {
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  const [zoom, setZoom] = useState(1);
 
   const previewData = {
     carousel: { id: id || "preview", name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime },
-    // A API real retorna a lista de vídeos com a propriedade productsList
-    videos: videoList.map(v => ({ ...v.video, productsList: [] }))
+    // A API agora retorna a lista de vídeos com a propriedade productsList
+    videos: videoList.map(v => ({ ...v.video, productsList: v.video?.productsList || [] }))
   };
 
   const mockScript = `
@@ -466,6 +468,51 @@ function LivePreviewSection({ id, name, title, subtitle, titleColor, subtitleCol
       return originalFetch(url, options);
     };
   `;
+
+  const touchMockScript = device !== "desktop" ? `
+    let isDragging = false;
+    let startPos = { x: 0, y: 0 };
+    let scrollPos = { top: 0, left: 0 };
+    
+    document.addEventListener("DOMContentLoaded", () => {
+      document.body.style.cursor = 'grab';
+      
+      // Hide scrollbars purely visually to match a phone screen
+      const style = document.createElement('style');
+      style.innerHTML = '::-webkit-scrollbar { display: none; } * { -ms-overflow-style: none; scrollbar-width: none; }';
+      document.head.appendChild(style);
+    });
+
+    document.addEventListener('mousedown', (e) => {
+        if(e.button !== 0) return;
+        isDragging = true;
+        document.body.style.cursor = 'grabbing';
+        document.body.style.userSelect = 'none';
+        
+        startPos = { x: e.clientX, y: e.clientY };
+        scrollPos = { 
+            left: window.scrollX || document.documentElement.scrollLeft || document.body.scrollLeft, 
+            top: window.scrollY || document.documentElement.scrollTop || document.body.scrollTop 
+        };
+    }, { passive: true });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startPos.x;
+        const dy = e.clientY - startPos.y;
+        
+        window.scrollTo(scrollPos.left - dx, scrollPos.top - dy);
+    }, { passive: true });
+
+    const stopDrag = () => {
+        isDragging = false;
+        document.body.style.cursor = 'grab';
+        document.body.style.removeProperty('user-select');
+    };
+
+    document.addEventListener('mouseup', stopDrag);
+    document.addEventListener('mouseleave', stopDrag);
+  ` : "";
 
   const srcDoc = `
     <!DOCTYPE html>
@@ -484,6 +531,7 @@ function LivePreviewSection({ id, name, title, subtitle, titleColor, subtitleCol
       <div data-vidshop-carousel="${id || 'preview'}"></div>
       
       <script>${mockScript}</script>
+      <script>${touchMockScript}</script>
       <script src="${window.location.origin}/embed/carousel.js"></script>
     </body>
     </html>
@@ -493,22 +541,44 @@ function LivePreviewSection({ id, name, title, subtitle, titleColor, subtitleCol
   if (device === "tablet") widthClass = "w-[768px]";
   if (device === "mobile") widthClass = "w-[375px]";
 
+  const baseHeight = device !== 'desktop' ? 700 : 500;
+  const baseWidth = device === 'tablet' ? 768 : device === 'mobile' ? 375 : '100%';
+
   return (
     <Card className="border-0 rounded-none overflow-hidden h-full flex flex-col shadow-2xl">
-      <CardHeader className="py-3 px-4 sm:py-4 sm:px-6 border-b border-border bg-muted/20 flex flex-row items-center justify-between shrink-0">
+      <CardHeader className="py-3 px-4 sm:py-4 sm:px-6 border-b border-border bg-muted/20 flex flex-row items-center justify-between shrink-0 flex-wrap gap-4">
+        
         <div className="flex items-center gap-2">
           <Eye className="w-4 h-4 text-muted-foreground" />
           <CardTitle className="text-xs font-bold uppercase text-muted-foreground tracking-widest hidden sm:block">Preview em Tempo Real</CardTitle>
         </div>
+
+        {/* Zoom Controls */}
+        <div className="flex items-center gap-1 bg-background border border-border rounded-lg p-1 shadow-sm">
+           <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted" onClick={() => setZoom(z => Math.max(0.25, z - 0.1))} title="Diminuir Zoom">
+             <ZoomOut className="w-4 h-4" />
+           </Button>
+           <div className="w-12 text-center text-[11px] font-mono font-bold tracking-wider text-primary">
+             {Math.round(zoom * 100)}%
+           </div>
+           <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted" onClick={() => setZoom(z => Math.min(2, z + 0.1))} title="Aumentar Zoom">
+             <ZoomIn className="w-4 h-4" />
+           </Button>
+           <div className="w-[1px] h-4 bg-border mx-1" />
+           <Button variant="ghost" size="icon" className="h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted" onClick={() => setZoom(1)} title="Redefinir Zoom">
+             <RotateCcw className="w-3.5 h-3.5" />
+           </Button>
+        </div>
+
         <div className="flex items-center gap-3">
           <div className="flex bg-background border border-border rounded-lg p-1">
-            <Button variant={device === "desktop" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-sm" onClick={() => setDevice("desktop")} title="Desktop">
+            <Button variant={device === "desktop" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-sm" onClick={() => { setDevice("desktop"); setZoom(1); }} title="Desktop">
               <Monitor className="w-4 h-4" />
             </Button>
-            <Button variant={device === "tablet" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-sm" onClick={() => setDevice("tablet")} title="Tablet">
+            <Button variant={device === "tablet" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-sm" onClick={() => { setDevice("tablet"); setZoom(0.8); }} title="Tablet">
               <Tablet className="w-4 h-4" />
             </Button>
-            <Button variant={device === "mobile" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-sm" onClick={() => setDevice("mobile")} title="Mobile">
+            <Button variant={device === "mobile" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-sm" onClick={() => { setDevice("mobile"); setZoom(0.8); }} title="Mobile">
               <Smartphone className="w-4 h-4" />
             </Button>
           </div>
@@ -519,16 +589,33 @@ function LivePreviewSection({ id, name, title, subtitle, titleColor, subtitleCol
           )}
         </div>
       </CardHeader>
+      
+      {/* Scrollable Container */}
       <div className="bg-muted p-4 sm:p-8 flex justify-center items-start overflow-y-auto flex-1 h-[600px] sm:h-auto overflow-x-hidden">
-        <div className={`transition-all duration-500 ease-in-out bg-background rounded-xl flex shadow-[0_0_0_1px_rgba(0,0,0,0.05),0_20px_40px_-10px_rgba(0,0,0,0.1)] overflow-hidden shrink-0 ${widthClass} ${device !== 'desktop' ? 'h-[700px]' : 'h-[500px]'}`}>
-            <iframe 
-              // Using previewData string as key forces iframe replacement entirely when edits happen
-              key={JSON.stringify(previewData)}
-              className="w-full h-full border-none bg-transparent"
-              srcDoc={srcDoc}
-              title="VidShop Embed Preview"
-              sandbox="allow-scripts allow-same-origin"
-            />
+        {/* Dynamic Bounding Box matching Scaled size */}
+        <div 
+           className="relative flex justify-center transition-all duration-300 ease-out" 
+           style={{ 
+             width: typeof baseWidth === 'number' ? `calc(${baseWidth}px * ${zoom})` : '100%',
+             height: `calc(${baseHeight}px * ${zoom})` 
+           }}
+        >
+          {/* Unscaled Element with Visual Scale Applied */}
+          <div 
+             className={`absolute bg-background rounded-xl shadow-[0_0_0_1px_rgba(0,0,0,0.05),0_20px_40px_-10px_rgba(0,0,0,0.1)] overflow-hidden flex ${widthClass} transition-transform duration-300 ease-out origin-top`}
+             style={{ 
+               transform: `scale(${zoom})`, 
+               height: `${baseHeight}px`
+             }}
+          >
+              <iframe 
+                key={JSON.stringify(previewData)}
+                className="w-full h-full border-none bg-transparent"
+                srcDoc={srcDoc}
+                title="VidShop Embed Preview"
+                sandbox="allow-scripts allow-same-origin"
+              />
+          </div>
         </div>
       </div>
     </Card>

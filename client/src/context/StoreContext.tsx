@@ -6,6 +6,8 @@ interface Store {
   id: number;
   name: string;
   allowedDomain: string | null;
+  plan: string;
+  currentCycleViews: number;
 }
 
 interface StoreContextType {

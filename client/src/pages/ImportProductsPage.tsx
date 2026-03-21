@@ -85,11 +85,11 @@ export default function ImportProductsPage() {
           ? { url: urlInput, frequencyDays: syncInterval, syncTime } 
           : { url: urlInput };
 
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}` 
+          // Auth handled by apiFetch
         },
         body: JSON.stringify(bodyPayload),
       });
@@ -121,7 +121,7 @@ export default function ImportProductsPage() {
       const token = localStorage.getItem("token");
       const res = await apiFetch("/api/catalog/import", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        // headers: handled by apiFetch
         body: formData,
       });
       

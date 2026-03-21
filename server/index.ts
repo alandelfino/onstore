@@ -17,6 +17,9 @@ const app = express();
 app.use(cors({ origin: "*" })); // Permite acesso do script de carrossel de qualquer origem (inclusive localhost)
 const server = createServer(app);
 
+// Stripe webhook needs raw body for signature verification – register BEFORE express.json()
+app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 

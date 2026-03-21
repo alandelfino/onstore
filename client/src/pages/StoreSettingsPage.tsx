@@ -28,7 +28,7 @@ export default function StoreSettingsPage() {
       const res = await apiFetch(`/api/stores/${activeStore.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: storeName, allowedDomain: domain || null })
+        body: JSON.stringify({ name: storeName, allowedDomain: domain })
       });
       if (res.ok) {
         await fetchStores();
@@ -85,12 +85,12 @@ export default function StoreSettingsPage() {
                 className="max-w-md"
               />
               <p className="text-xs text-muted-foreground max-w-xl">
-                Apenas as requisições oriundas deste domínio poderão carregar os carrosséis de vídeos via Embed API. Deixe em branco para permitir qualquer origem (não recomendado).
+                Apenas as requisições oriundas deste domínio poderão carregar os carrosséis de vídeos via Embed API. Este campo é obrigatório para sua segurança.
               </p>
             </div>
 
             <div className="pt-2 border-t flex justify-end">
-              <Button type="submit" disabled={savingDomain} className="w-full sm:w-auto">
+              <Button type="submit" disabled={savingDomain || !domain.trim() || !storeName.trim()} className="w-full sm:w-auto">
                 {savingDomain ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                 {savingDomain ? "Salvando..." : "Salvar Configurações"}
               </Button>

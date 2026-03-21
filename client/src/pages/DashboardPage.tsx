@@ -1,7 +1,7 @@
 import { useStore } from '../context/StoreContext';
 import { apiFetch } from "@/lib/api";
 import { useEffect, useState } from "react";
-import { useNavigate, useLocation, Outlet, Link } from "react-router-dom";
+import { useNavigate, useLocation, Outlet, Link, useOutletContext } from "react-router-dom";
 import {
   LayoutDashboard,
   LogOut,
@@ -12,17 +12,25 @@ import {
   ArrowDownToLine,
   PlaySquare,
   LayoutGrid,
-  Settings
+  Settings,
+  CreditCard
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-interface AuthUser {
+export interface AuthUser {
   id: number;
   name: string;
   email: string;
+  plan: string;
+  subscriptionStatus: string;
+  currentCycleViews: number;
+}
+
+export function useAuthUser() {
+  return useOutletContext<AuthUser | null>();
 }
 
 const navGroups = [
@@ -50,6 +58,7 @@ const navGroups = [
     label: "Configuração",
     items: [
       { icon: Settings, label: "Loja", path: "/dashboard/settings" },
+      { icon: CreditCard, label: "Assinatura", path: "/dashboard/billing" },
     ],
   },
 ];
@@ -101,6 +110,7 @@ export default function DashboardPage() {
   else if (path === "/dashboard/import") { title = "Importação"; subtitle = "Adicione produtos via feed XML"; }
   else if (path.startsWith("/dashboard/videos")) { title = "Shoppable Videos"; subtitle = "Crie experiências interativas para seus clientes"; }
   else if (path.startsWith("/dashboard/settings")) { title = "Configurações"; subtitle = "Ajuste os parâmetros da loja e acesso"; }
+  else if (path.startsWith("/dashboard/billing")) { title = "Assinatura"; subtitle = "Gerencie seu plano e histórico"; }
 
   const Sidebar = (
     <aside className="flex flex-col h-full w-64 bg-foreground text-white">
@@ -207,7 +217,7 @@ export default function DashboardPage() {
             ) : (
               <>
                 <Button variant="outline" size="sm" onClick={() => navigate("/dashboard/stores")} className="hidden md:flex h-8 text-xs font-semibold mr-2 border-primary/20 hover:bg-primary/5">
-                  Trocar Loja
+                  Minhas Lojas
                 </Button>
                 <div className="h-8 w-px bg-border hidden sm:block mx-1"></div>
                 <span className="text-sm text-muted-foreground hidden sm:block ml-2">
@@ -221,7 +231,7 @@ export default function DashboardPage() {
 
         {/* Page content */}
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
-          <Outlet />
+          <Outlet context={user} />
         </div>
       </main>
     </div>

@@ -5,6 +5,15 @@ import { Plus, Edit, Trash2, Loader2, LayoutGrid, Package, Eye, EyeOff, Code2, C
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useAuthUser } from "./DashboardPage";
+import { useStore } from "../context/StoreContext";
+
+const PLANS = {
+  free: { name: "Free", limits: { carousels: 1 } },
+  pro: { name: "Pro", limits: { carousels: 2 } },
+  ultra: { name: "Ultra", limits: { carousels: 999999 } },
+  gold: { name: "Gold", limits: { carousels: 999999 } }
+};
 
 interface Carousel {
   id: number;
@@ -86,6 +95,19 @@ export default function CarouselsPage() {
   const [loading, setLoading] = useState(true);
   const [embedTarget, setEmbedTarget] = useState<Carousel | null>(null);
   const navigate = useNavigate();
+  const user = useAuthUser();
+  const { activeStore } = useStore();
+
+  const handleNewCarousel = () => {
+    const plan = PLANS[(activeStore?.plan as keyof typeof PLANS) || "free"];
+    if (carousels.length >= plan.limits.carousels) {
+      if (window.confirm(`Oops, você atingiu o limite de ${plan.limits.carousels} carrossel(eis) no plano ${plan.name}. Faça o upgrade agora para expandir!`)) {
+        navigate("/dashboard/billing");
+      }
+      return;
+    }
+    navigate("/dashboard/carousels/new");
+  };
 
   const fetchCarousels = async () => {
     setLoading(true);
@@ -122,7 +144,7 @@ export default function CarouselsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Carrosseis</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Gerencie coleções de vídeos para exibição em carrossel.</p>
         </div>
-        <Button onClick={() => navigate("/dashboard/carousels/new")}>
+        <Button onClick={handleNewCarousel}>
           <Plus className="w-4 h-4 mr-2" />
           Novo Carrossel
         </Button>
@@ -139,7 +161,7 @@ export default function CarouselsPage() {
           <p className="text-sm text-muted-foreground mt-1 mb-6 max-w-xs">
             Crie seu primeiro carrossel para organizar vídeos e exibi-los em qualquer loja.
           </p>
-          <Button onClick={() => navigate("/dashboard/carousels/new")}>
+          <Button onClick={handleNewCarousel}>
             <Plus className="w-4 h-4 mr-2" /> Criar Carrossel
           </Button>
         </div>

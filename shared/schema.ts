@@ -8,6 +8,12 @@ export const users = pgTable("users", {
   isEmailVerified: boolean("is_email_verified").notNull().default(false),
   verificationCode: text("verification_code"),
   verificationCodeExpiresAt: timestamp("verification_code_expires_at"),
+  
+  // Billing and Features
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  subscriptionStatus: text("subscription_status"), // active, past_due, canceled
+  
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -19,6 +25,11 @@ export const stores = pgTable("stores", {
   name: text("name").notNull(),
   ownerId: integer("owner_id").references(() => users.id, { onDelete: 'cascade' }).notNull(),
   allowedDomain: text("allowed_domain"),
+  
+  // Billing specific to this store
+  plan: text("plan").notNull().default("free"), // free, pro, ultra, gold
+  currentCycleViews: integer("current_cycle_views").notNull().default(0),
+  
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

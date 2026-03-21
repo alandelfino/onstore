@@ -4,6 +4,15 @@ import { Loader2, Plus, Edit, Trash2, Video, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useNavigate } from "react-router-dom";
+import { useAuthUser } from "./DashboardPage";
+import { useStore } from "../context/StoreContext";
+
+const PLANS = {
+  free: { name: "Free", limits: { videos: 10 } },
+  pro: { name: "Pro", limits: { videos: 50 } },
+  ultra: { name: "Ultra", limits: { videos: 999999 } },
+  gold: { name: "Gold", limits: { videos: 999999 } }
+};
 
 interface ShoppableVideo {
   id: number;
@@ -19,6 +28,19 @@ export default function VideosPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const navigate = useNavigate();
+  const user = useAuthUser();
+  const { activeStore } = useStore();
+
+  const handleNewVideo = () => {
+    const plan = PLANS[(activeStore?.plan as keyof typeof PLANS) || "free"];
+    if (videos.length >= plan.limits.videos) {
+      if (window.confirm(`Oops, você atingiu o limite de ${plan.limits.videos} vídeos no plano ${plan.name}. Faça o upgrade agora para expandir!`)) {
+        navigate("/dashboard/billing");
+      }
+      return;
+    }
+    navigate("/dashboard/videos/new");
+  };
 
   const fetchVideos = async () => {
     setLoading(true);
@@ -78,7 +100,7 @@ export default function VideosPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <Button onClick={() => navigate("/dashboard/videos/new")}>
+          <Button onClick={handleNewVideo}>
             <Plus className="w-4 h-4 mr-2" />
             Novo Vídeo
           </Button>
@@ -97,7 +119,7 @@ export default function VideosPage() {
            <p className="text-sm text-muted-foreground max-w-sm mx-auto mt-1 mb-6">
              Você ainda não enviou nenhum vídeo com produtos relacionados. Crie seu primeiro Shoppable Video apertando abaixo.
            </p>
-           <Button onClick={() => navigate("/dashboard/videos/new")}>
+           <Button onClick={handleNewVideo}>
              <Plus className="w-4 h-4 mr-2" />
              Criar Primeiro Vídeo
            </Button>
