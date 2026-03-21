@@ -287,6 +287,32 @@ export function registerRoutes(app: Express) {
         res.json({ success: true });
     });
 
+    // POST /api/videos/:id/extract-thumbs
+    app.post("/api/videos/:id/extract-thumbs", authMiddleware, async (req: Request, res: Response) => {
+        try {
+            const storeId = getStoreId(req);
+            const videoId = parseInt(req.params.id);
+            const [video] = await db.select().from(shoppableVideos).where(and(eq(shoppableVideos.id, videoId), eq(shoppableVideos.storeId, storeId)));
+            
+            if (!video) return res.status(404).json({ error: "Vídeo não encontrado" });
+            if (video.autoThumbnails && video.autoThumbnails.length > 0) {
+                return res.json({ urls: video.autoThumbnails });
+            }
+            
+            const { extractFramesToR2 } = await import("./ffmpeg.js");
+            const urls = await extractFramesToR2(video.mediaUrl);
+            
+            await db.update(shoppableVideos)
+                .set({ autoThumbnails: urls })
+                .where(eq(shoppableVideos.id, videoId));
+            
+            res.json({ urls });
+        } catch (e: any) {
+            console.error("Frame extraction error:", e);
+            res.status(500).json({ error: e.message || "Failed to extract frames" });
+        }
+    });
+
     // ── Products & Catalog ────────────────────────────────────────────────────
 
     app.post(
@@ -491,6 +517,7 @@ export function registerRoutes(app: Express) {
                 title: shoppableVideos.title,
                 description: shoppableVideos.description,
                 mediaUrl: shoppableVideos.mediaUrl,
+                thumbnailUrl: shoppableVideos.thumbnailUrl,
             }
         })
             .from(carouselVideos)

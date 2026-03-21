@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp, boolean, unique } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, boolean, unique, jsonb } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -93,6 +93,7 @@ export const shoppableVideos = pgTable("shoppable_videos", {
   storeId: integer("store_id").references(() => stores.id, { onDelete: 'cascade' }),
   mediaUrl: text("media_url").notNull(),
   thumbnailUrl: text("thumbnail_url"),
+  autoThumbnails: jsonb("auto_thumbnails").$type<string[]>(),
   title: text("title").notNull(),
   description: text("description"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

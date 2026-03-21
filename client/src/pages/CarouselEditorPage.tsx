@@ -2,7 +2,7 @@ import { apiFetch } from "@/lib/api";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Loader2, Save, Plus, Search, X, Eye, EyeOff, GripVertical, Video, Code2, Copy, Check
+  ArrowLeft, Loader2, Save, Plus, Search, X, Eye, EyeOff, GripVertical, Video, Code2, Copy, Check, Monitor, Tablet, Smartphone
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,7 @@ interface ShoppableVideo {
   title: string;
   description: string | null;
   mediaUrl: string;
+  thumbnailUrl?: string | null;
 }
 
 interface CarouselVideoEntry {
@@ -45,6 +46,9 @@ export default function CarouselEditorPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ShoppableVideo[]>([]);
   const [searching, setSearching] = useState(false);
+
+  // Preview Modal
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // Drag re-order
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -166,8 +170,8 @@ export default function CarouselEditorPage() {
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full pb-10">
-      {/* Sticky Header */}
-      <div className="flex items-center justify-between bg-card border border-border rounded-xl px-5 py-3 shadow-sm sticky top-0 z-40">
+      {/* Header */}
+      <div className="flex items-center justify-between bg-card border border-border rounded-xl px-5 py-3 shadow-sm relative z-10">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard/carousels")}>
             <ArrowLeft className="w-5 h-5" />
@@ -179,10 +183,16 @@ export default function CarouselEditorPage() {
             </p>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={saving} className="bg-primary hover:bg-primary/90">
-          {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-          Salvar
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" onClick={() => setPreviewOpen(true)} className="flex items-center gap-2">
+            <Monitor className="w-4 h-4" />
+            <span className="hidden sm:inline">Preview</span>
+          </Button>
+          <Button onClick={handleSave} disabled={saving} className="bg-primary hover:bg-primary/90">
+            {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+            Salvar
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -347,7 +357,7 @@ export default function CarouselEditorPage() {
                       onClick={() => addVideo(v)}
                     >
                       <div className="w-14 h-9 bg-black rounded overflow-hidden shrink-0 border border-border">
-                        <video src={v.mediaUrl} className="w-full h-full object-cover opacity-80" preload="metadata" muted />
+                        <video src={v.mediaUrl} poster={v.thumbnailUrl || undefined} className="w-full h-full object-cover opacity-80" preload="metadata" muted />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold truncate">{v.title}</p>
@@ -387,6 +397,7 @@ export default function CarouselEditorPage() {
                         {entry.video?.mediaUrl && (
                           <video
                             src={entry.video.mediaUrl}
+                            poster={entry.video.thumbnailUrl || undefined}
                             className="w-full h-full object-cover opacity-80"
                             preload="metadata"
                             muted
@@ -416,11 +427,111 @@ export default function CarouselEditorPage() {
         </div>
       </div>
 
+      {/* Preview Modal Overlay */}
+      {previewOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/95 backdrop-blur-sm">
+          <div className="w-full h-full flex flex-col relative z-50">
+            <LivePreviewSection 
+              id={id} name={name} title={title} subtitle={subtitle} titleColor={titleColor} subtitleColor={subtitleColor} 
+              layout={layout} showProducts={showProducts} previewTime={previewTime} videoList={videoList}
+              onClose={() => setPreviewOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Embed Section — only for existing carousels */}
       {!isNew && (
         <EmbedSection id={id!} />
       )}
     </div>
+  );
+}
+
+function LivePreviewSection({ id, name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime, videoList, onClose }: { id: string | undefined, name: string, title: string, subtitle: string, titleColor: string, subtitleColor: string, layout: string, showProducts: boolean, previewTime: number, videoList: CarouselVideoEntry[], onClose?: () => void }) {
+  const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
+
+  const previewData = {
+    carousel: { id: id || "preview", name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime },
+    // A API real retorna a lista de vídeos com a propriedade productsList
+    videos: videoList.map(v => ({ ...v.video, productsList: [] }))
+  };
+
+  const mockScript = `
+    const originalFetch = window.fetch;
+    window.fetch = async function(url, options) {
+      if (url.includes('/api/public/carousels/')) {
+         return { json: async () => (${JSON.stringify(previewData)}) };
+      }
+      return originalFetch(url, options);
+    };
+  `;
+
+  const srcDoc = `
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Preview</title>
+      <style>
+        body { font-family: system-ui, sans-serif; padding: 2rem 0; margin: 0; background: transparent; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      </style>
+    </head>
+    <body class="antialiased">
+      <div data-vidshop-carousel="${id || 'preview'}"></div>
+      
+      <script>${mockScript}</script>
+      <script src="${window.location.origin}/embed/carousel.js"></script>
+    </body>
+    </html>
+  `;
+
+  let widthClass = "w-full";
+  if (device === "tablet") widthClass = "w-[768px]";
+  if (device === "mobile") widthClass = "w-[375px]";
+
+  return (
+    <Card className="border-0 rounded-none overflow-hidden h-full flex flex-col shadow-2xl">
+      <CardHeader className="py-3 px-4 sm:py-4 sm:px-6 border-b border-border bg-muted/20 flex flex-row items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <Eye className="w-4 h-4 text-muted-foreground" />
+          <CardTitle className="text-xs font-bold uppercase text-muted-foreground tracking-widest hidden sm:block">Preview em Tempo Real</CardTitle>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex bg-background border border-border rounded-lg p-1">
+            <Button variant={device === "desktop" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-sm" onClick={() => setDevice("desktop")} title="Desktop">
+              <Monitor className="w-4 h-4" />
+            </Button>
+            <Button variant={device === "tablet" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-sm" onClick={() => setDevice("tablet")} title="Tablet">
+              <Tablet className="w-4 h-4" />
+            </Button>
+            <Button variant={device === "mobile" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-sm" onClick={() => setDevice("mobile")} title="Mobile">
+              <Smartphone className="w-4 h-4" />
+            </Button>
+          </div>
+          {onClose && (
+            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full ml-2 text-muted-foreground hover:bg-muted" onClick={onClose}>
+              <X className="w-5 h-5" />
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <div className="bg-muted p-4 sm:p-8 flex justify-center items-start overflow-y-auto flex-1 h-[600px] sm:h-auto overflow-x-hidden">
+        <div className={`transition-all duration-500 ease-in-out bg-background rounded-xl flex shadow-[0_0_0_1px_rgba(0,0,0,0.05),0_20px_40px_-10px_rgba(0,0,0,0.1)] overflow-hidden shrink-0 ${widthClass} ${device !== 'desktop' ? 'h-[700px]' : 'h-[500px]'}`}>
+            <iframe 
+              // Using previewData string as key forces iframe replacement entirely when edits happen
+              key={JSON.stringify(previewData)}
+              className="w-full h-full border-none bg-transparent"
+              srcDoc={srcDoc}
+              title="VidShop Embed Preview"
+              sandbox="allow-scripts allow-same-origin"
+            />
+        </div>
+      </div>
+    </Card>
   );
 }
 

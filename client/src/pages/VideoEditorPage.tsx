@@ -71,8 +71,17 @@ export default function VideoEditorPage() {
         });
         if (res.ok) {
           const data = await res.json();
+          const loadedThumbnail = data.video.thumbnailUrl || "";
+          const loadedAutoThumbs = data.video.autoThumbnails || [];
           setMediaUrl(data.video.mediaUrl || "");
-          setThumbnailUrl(data.video.thumbnailUrl || "");
+          setAutoThumbnails(loadedAutoThumbs);
+          
+          if (!loadedThumbnail && loadedAutoThumbs.length > 0) {
+            setThumbnailUrl(loadedAutoThumbs[0]);
+          } else {
+            setThumbnailUrl(loadedThumbnail);
+          }
+          
           setTitle(data.video.title || "");
           setDescription(data.video.description || "");
           setTimeline(data.videoProducts || []);
@@ -100,40 +109,45 @@ export default function VideoEditorPage() {
     };
   }, [mediaUrl]);
 
-  // Video Frame Extraction
+  // Video Frame Extraction via Backend API
   useEffect(() => {
-    if (!mediaUrl || thumbnailUrl) return;
-    setGeneratingThumbs(true);
-    const video = document.createElement("video");
-    video.crossOrigin = "anonymous";
-    video.src = mediaUrl;
-    video.muted = true;
+    if (!mediaUrl || isNew || !id) return;
+    if (autoThumbnails.length > 0) return; // Se já gerou ou carregou do banco, não faz requisição
     
-    video.onloadeddata = async () => {
-      const dur = video.duration;
-      if (!dur || dur === Infinity) {
-        setGeneratingThumbs(false);
-        return;
+    setGeneratingThumbs(true);
+    let isMounted = true;
+    
+    const extract = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await apiFetch(`/api/videos/${id}/extract-thumbs`, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}` 
+          }
+        });
+        
+        if (!res.ok) throw new Error("Falha na extração de frames");
+        const data = await res.json();
+        if (isMounted) {
+          const generatedUrls = data.urls || [];
+          setAutoThumbnails(generatedUrls);
+          setThumbnailUrl(current => {
+            if (!current && generatedUrls.length > 0) return generatedUrls[0];
+            return current;
+          });
+        }
+      } catch (err) {
+        console.error("Erro na extração backend:", err);
+      } finally {
+        if (isMounted) setGeneratingThumbs(false);
       }
-      const stamps = [0.1, 0.3, 0.5, 0.7, 0.9].map(m => m * dur);
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      const thumbs: string[] = [];
-      
-      for (const t of stamps) {
-        video.currentTime = t;
-        await new Promise<void>(r => { video.onseeked = () => r(); });
-        canvas.width = video.videoWidth / 3;
-        canvas.height = video.videoHeight / 3;
-        ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-        thumbs.push(canvas.toDataURL("image/jpeg", 0.7));
-      }
-      setAutoThumbnails(thumbs);
-      setGeneratingThumbs(false);
     };
 
-    video.onerror = () => setGeneratingThumbs(false);
-  }, [mediaUrl, thumbnailUrl]);
+    extract();
+    return () => { isMounted = false; };
+  }, [mediaUrl, isNew, id]);
 
   // Pointer Drag Effects
   useEffect(() => {
@@ -318,29 +332,12 @@ export default function VideoEditorPage() {
     }
   };
 
-  const handleSelectAutoThumb = async (dataUrl: string) => {
+  const handleSelectAutoThumb = async (imageUrl: string) => {
     try {
       setLoading(true);
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      const file = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
-      
-      const formData = new FormData();
-      formData.append("file", file);
-      const token = localStorage.getItem("token");
-      const storeId = localStorage.getItem("activeStoreId");
-      
-      const uploadRes = await apiFetch("/api/media/upload", {
-        method: "POST",
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          ...(storeId ? { "x-store-id": storeId } : {})
-        },
-        body: formData,
-      });
-      if (!uploadRes.ok) throw new Error("Erro no upload do frame automático");
-      const uploadData = await uploadRes.json();
-      setThumbnailUrl(uploadData.media.url);
+      // O backend já subiu essa imagem pro R2 e nos devolveu a URL pronta.
+      // Basta aceitá-la diretamente e salvar no video.
+      setThumbnailUrl(imageUrl);
     } catch (err: any) {
       alert("Erro ao definir capa automática: " + err.message);
     } finally {
@@ -518,7 +515,7 @@ export default function VideoEditorPage() {
                   </div>
                   
                   {/* GENERATED THUMBNAILS UI */}
-                  {!thumbnailUrl && (generatingThumbs || autoThumbnails.length > 0) && (
+                  {(generatingThumbs || autoThumbnails.length > 0) && (
                     <div className="mt-1">
                       <p className="text-[10px] text-muted-foreground uppercase mb-2 font-semibold">Ou escolha um frame do vídeo:</p>
                       {generatingThumbs ? (
