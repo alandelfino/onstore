@@ -53,7 +53,8 @@ export async function processQueue() {
           throw new Error("Source type inválido.");
         }
 
-        await parseCatalogStream(stream, job.id);
+        if (!job.storeId) throw new Error("Store ID inválido no job.");
+        await parseCatalogStream(stream, job.id, job.storeId);
       } catch (err: any) {
         console.error("Queue job error:", err);
         await db

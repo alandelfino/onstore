@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api";
 import { useState, useEffect, useRef } from "react";
 import { Upload, Link as LinkIcon, AlertCircle, Loader2, CheckCircle2, XCircle, Clock, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,8 +46,8 @@ export default function ImportProductsPage() {
     try {
       const token = localStorage.getItem("token");
       const [resJobs, resSyncs] = await Promise.all([
-        fetch("/api/catalog/imports", { headers: { Authorization: `Bearer ${token}` } }),
-        fetch("/api/catalog/syncs", { headers: { Authorization: `Bearer ${token}` } })
+        apiFetch("/api/catalog/imports", { headers: { Authorization: `Bearer ${token}` } }),
+        apiFetch("/api/catalog/syncs", { headers: { Authorization: `Bearer ${token}` } })
       ]);
       
       if (resJobs.ok) {
@@ -118,7 +119,7 @@ export default function ImportProductsPage() {
 
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch("/api/catalog/import", {
+      const res = await apiFetch("/api/catalog/import", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -140,7 +141,7 @@ export default function ImportProductsPage() {
     if (!window.confirm("Deseja realmente remover esta automação? Seu catálogo não será apagado.")) return;
     try {
       const token = localStorage.getItem("token");
-      await fetch(`/api/catalog/syncs/${id}`, {
+      await apiFetch(`/api/catalog/syncs/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });

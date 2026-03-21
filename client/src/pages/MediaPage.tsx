@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
 import {
   Upload,
@@ -41,6 +42,7 @@ export default function MediaPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -50,7 +52,7 @@ export default function MediaPage() {
   async function fetchMedia() {
     setLoading(true);
     try {
-      const res = await fetch("/api/media", {
+      const res = await apiFetch("/api/media", {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await res.json();
@@ -64,46 +66,72 @@ export default function MediaPage() {
     fetchMedia();
   }, []);
 
-  async function uploadFile(file: File) {
-    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
-      setUploadError("Tipo não permitido. Envie somente imagens ou vídeos.");
-      return;
-    }
-    setUploadError("");
-    setUploading(true);
-
-    const form = new FormData();
-    form.append("file", file);
-
-    try {
-      const res = await fetch("/api/media/upload", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
-        body: form,
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setUploadError(data.error ?? "Erro ao fazer upload.");
-        return;
+  function uploadFilePromise(file: File) {
+    return new Promise<void>((resolve) => {
+      if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+        setUploadError("Tipo não permitido. Envie somente imagens ou vídeos.");
+        return resolve();
       }
-      setItems((prev) => [data.media, ...prev]);
-    } catch {
-      setUploadError("Erro de conexão. Tente novamente.");
-    } finally {
-      setUploading(false);
-    }
+      setUploadError("");
+      setUploadProgress(0);
+
+      const form = new FormData();
+      form.append("file", file);
+
+      const xhr = new XMLHttpRequest();
+      const token = localStorage.getItem("token");
+      const storeId = localStorage.getItem("activeStoreId");
+
+      xhr.open("POST", "/api/media/upload");
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      if (storeId) xhr.setRequestHeader("x-store-id", storeId);
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          setUploadProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            setItems((prev) => [data.media, ...prev]);
+          } catch (e) {}
+        } else {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            setUploadError(data.error ?? "Erro ao fazer upload.");
+          } catch (e) {
+            setUploadError("Erro ao fazer upload.");
+          }
+        }
+        resolve();
+      };
+
+      xhr.onerror = () => {
+        setUploadError("Erro de conexão. Tente novamente.");
+        resolve();
+      };
+
+      xhr.send(form);
+    });
   }
 
-  function handleFiles(files: FileList | null) {
+  async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
-    // Upload all files sequentially
-    Array.from(files).forEach((f) => uploadFile(f));
+    setUploading(true);
+    for (let i = 0; i < files.length; i++) {
+      await uploadFilePromise(files[i]);
+    }
+    setUploading(false);
+    setUploadProgress(0);
   }
 
   async function handleDelete(id: number) {
     setDeletingId(id);
     try {
-      await fetch(`/api/media/${id}`, {
+      await apiFetch(`/api/media/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${getToken()}` },
       });
@@ -138,14 +166,23 @@ export default function MediaPage() {
         <Button
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="min-h-[44px] w-full sm:w-auto"
+          className="min-h-[44px] w-full sm:w-auto relative overflow-hidden"
         >
           {uploading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <>
+              <div 
+                className="absolute left-0 top-0 bottom-0 bg-white/20 transition-all duration-300 pointer-events-none"
+                style={{ width: `${uploadProgress}%` }}
+              />
+              <Loader2 className="w-4 h-4 animate-spin relative z-10 mr-2" />
+              <span className="relative z-10 whitespace-nowrap">Enviando {uploadProgress}%</span>
+            </>
           ) : (
-            <Upload className="w-4 h-4" />
+            <>
+              <Upload className="w-4 h-4 mr-2" />
+              Fazer upload
+            </>
           )}
-          {uploading ? "Enviando..." : "Fazer upload"}
         </Button>
         <input
           ref={inputRef}

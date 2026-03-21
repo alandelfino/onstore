@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Loader2, Upload, Save, ArrowLeft, Plus, Search, Trash2, X, AlertCircle, GripVertical, GripHorizontal, Video } from "lucide-react";
@@ -25,6 +26,9 @@ export default function VideoEditorPage() {
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [autoThumbnails, setAutoThumbnails] = useState<string[]>([]);
+  const [generatingThumbs, setGeneratingThumbs] = useState(false);
   
   const [mediaUrl, setMediaUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
@@ -62,7 +66,7 @@ export default function VideoEditorPage() {
     const fetchVideo = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await fetch(`/api/videos/${id}`, {
+        const res = await apiFetch(`/api/videos/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {
@@ -95,6 +99,41 @@ export default function VideoEditorPage() {
       video.removeEventListener("loadedmetadata", handleLoadedMeta);
     };
   }, [mediaUrl]);
+
+  // Video Frame Extraction
+  useEffect(() => {
+    if (!mediaUrl || thumbnailUrl) return;
+    setGeneratingThumbs(true);
+    const video = document.createElement("video");
+    video.crossOrigin = "anonymous";
+    video.src = mediaUrl;
+    video.muted = true;
+    
+    video.onloadeddata = async () => {
+      const dur = video.duration;
+      if (!dur || dur === Infinity) {
+        setGeneratingThumbs(false);
+        return;
+      }
+      const stamps = [0.1, 0.3, 0.5, 0.7, 0.9].map(m => m * dur);
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      const thumbs: string[] = [];
+      
+      for (const t of stamps) {
+        video.currentTime = t;
+        await new Promise<void>(r => { video.onseeked = () => r(); });
+        canvas.width = video.videoWidth / 3;
+        canvas.height = video.videoHeight / 3;
+        ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+        thumbs.push(canvas.toDataURL("image/jpeg", 0.7));
+      }
+      setAutoThumbnails(thumbs);
+      setGeneratingThumbs(false);
+    };
+
+    video.onerror = () => setGeneratingThumbs(false);
+  }, [mediaUrl, thumbnailUrl]);
 
   // Pointer Drag Effects
   useEffect(() => {
@@ -205,29 +244,55 @@ export default function VideoEditorPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setLoading(true);
+    setUploadProgress(0);
+
     const formData = new FormData();
     formData.append("file", file);
-    try {
-      const token = localStorage.getItem("token");
-      const uploadRes = await fetch("/api/media/upload", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!uploadRes.ok) throw new Error("Erro no upload do vídeo");
-      const uploadData = await uploadRes.json();
-      const videoRes = await fetch("/api/videos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title: file.name, mediaUrl: uploadData.media.url, description: "" })
-      });
-      if (!videoRes.ok) throw new Error("Erro ao criar registro");
-      const videoData = await videoRes.json();
-      navigate(`/dashboard/videos/edit/${videoData.video.id}`, { replace: true });
-    } catch (err: any) {
-      alert(err.message);
+
+    const xhr = new XMLHttpRequest();
+    const token = localStorage.getItem("token");
+    const storeId = localStorage.getItem("activeStoreId");
+
+    xhr.open("POST", "/api/media/upload");
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    if (storeId) xhr.setRequestHeader("x-store-id", storeId);
+
+    xhr.upload.onprogress = (evt) => {
+      if (evt.lengthComputable) {
+        setUploadProgress(Math.round((evt.loaded / evt.total) * 100));
+      }
+    };
+
+    xhr.onload = async () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const uploadData = JSON.parse(xhr.responseText);
+          const videoRes = await apiFetch("/api/videos", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ title: file.name, mediaUrl: uploadData.media.url, description: "" })
+          });
+          if (!videoRes.ok) throw new Error("Erro ao criar registro");
+          const videoData = await videoRes.json();
+          setLoading(false);
+          setUploadProgress(0);
+          navigate(`/dashboard/videos/edit/${videoData.video.id}`, { replace: true });
+        } catch (err: any) {
+          alert(err.message || "Erro inesperado.");
+          setLoading(false);
+        }
+      } else {
+        alert("Erro no upload do vídeo.");
+        setLoading(false);
+      }
+    };
+
+    xhr.onerror = () => {
+      alert("Erro de conexão no upload.");
       setLoading(false);
-    }
+    };
+
+    xhr.send(formData);
   };
 
   const handleUploadThumbnail = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -238,7 +303,7 @@ export default function VideoEditorPage() {
     formData.append("file", file);
     try {
       const token = localStorage.getItem("token");
-      const uploadRes = await fetch("/api/media/upload", {
+      const uploadRes = await apiFetch("/api/media/upload", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -253,12 +318,42 @@ export default function VideoEditorPage() {
     }
   };
 
+  const handleSelectAutoThumb = async (dataUrl: string) => {
+    try {
+      setLoading(true);
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const file = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
+      
+      const formData = new FormData();
+      formData.append("file", file);
+      const token = localStorage.getItem("token");
+      const storeId = localStorage.getItem("activeStoreId");
+      
+      const uploadRes = await apiFetch("/api/media/upload", {
+        method: "POST",
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          ...(storeId ? { "x-store-id": storeId } : {})
+        },
+        body: formData,
+      });
+      if (!uploadRes.ok) throw new Error("Erro no upload do frame automático");
+      const uploadData = await uploadRes.json();
+      setThumbnailUrl(uploadData.media.url);
+    } catch (err: any) {
+      alert("Erro ao definir capa automática: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSearchProduct = async () => {
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`/api/products?search=${encodeURIComponent(searchQuery)}&limit=10`, {
+      const res = await apiFetch(`/api/products?search=${encodeURIComponent(searchQuery)}&limit=10`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
@@ -322,7 +417,7 @@ export default function VideoEditorPage() {
     setSaving(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`/api/videos/${id}`, {
+      const res = await apiFetch(`/api/videos/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -349,13 +444,27 @@ export default function VideoEditorPage() {
             <p className="text-sm text-muted-foreground mt-1">Envie o vídeo matriz para começarmos a edição na timeline.</p>
           </div>
           <div className="p-6">
-            <label className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-xl p-16 bg-muted/10 hover:bg-muted/20 cursor-pointer transition-colors group">
-              <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-5 group-hover:bg-primary/10 transition-colors">
-                <Upload className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
+            <label className="relative overflow-hidden flex flex-col items-center justify-center border-2 border-dashed border-border rounded-xl p-16 bg-muted/10 hover:bg-muted/20 cursor-pointer transition-colors group">
+              {loading && (
+                <div 
+                  className="absolute left-0 top-0 bottom-0 bg-primary/30 transition-all duration-300 pointer-events-none"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              )}
+              <div className="relative z-10 flex flex-col items-center">
+                <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-5 group-hover:bg-primary/20 transition-colors shadow-sm">
+                  {loading ? (
+                    <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                  ) : (
+                    <Upload className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
+                  )}
+                </div>
+                <p className="text-base font-semibold text-foreground">
+                  {loading ? (uploadProgress > 0 ? `Enviando vídeo... ${uploadProgress}%` : 'Processando envio...') : 'Clique para escolher o vídeo'}
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">Formatos suportados: .mp4, .mov, .webm</p>
               </div>
-              <p className="text-base font-semibold text-foreground">Clique para escolher o vídeo</p>
-              <p className="text-sm text-muted-foreground mt-1">Formatos suportados: .mp4, .mov, .webm</p>
-              <input type="file" accept="video/*" className="hidden" onChange={handleUploadNew} />
+              <input type="file" accept="video/*" className="hidden" onChange={handleUploadNew} disabled={loading} />
             </label>
           </div>
         </div>
@@ -366,7 +475,7 @@ export default function VideoEditorPage() {
   return (
     <div className="flex flex-col gap-5 h-full max-w-[1400px] mx-auto w-full pb-8">
       {/* Header */}
-      <div className="flex items-center justify-between bg-card p-4 rounded-xl border border-border sticky top-0 z-50 shadow-sm">
+      <div className="flex items-center justify-between bg-card p-4 rounded-xl border border-border relative z-10 shadow-sm">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard/videos")}><ArrowLeft className="w-5 h-5" /></Button>
           <div>
@@ -395,7 +504,7 @@ export default function VideoEditorPage() {
               <CardContent className="space-y-4 p-5 flex-1 flex flex-col">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase mb-1 block">Título</label>
-                  <input className="flex h-10 w-full rounded-md border border-input bg-background/50 px-3 py-2 text-sm focus:ring-1 focus:ring-primary shadow-sm" value={title} onChange={e => setTitle(e.target.value)} />
+                  <input className="flex h-10 w-full rounded-md border border-input bg-white text-black px-3 py-2 text-sm focus:ring-1 focus:ring-primary shadow-sm" value={title} onChange={e => setTitle(e.target.value)} />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase mb-1 block">Capa (Thumbnail)</label>
@@ -407,10 +516,26 @@ export default function VideoEditorPage() {
                       <input type="file" accept="image/*" className="hidden" onChange={handleUploadThumbnail} />
                     </label>
                   </div>
+                  
+                  {/* GENERATED THUMBNAILS UI */}
+                  {!thumbnailUrl && (generatingThumbs || autoThumbnails.length > 0) && (
+                    <div className="mt-1">
+                      <p className="text-[10px] text-muted-foreground uppercase mb-2 font-semibold">Ou escolha um frame do vídeo:</p>
+                      {generatingThumbs ? (
+                         <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin"/> Extraindo frames...</div>
+                      ) : (
+                         <div className="flex gap-2 relative overflow-x-auto pb-1 custom-scrollbar">
+                           {autoThumbnails.map((t, i) => (
+                              <img key={i} src={t} className="w-[72px] h-[44px] rounded-md object-cover cursor-pointer hover:ring-2 hover:ring-primary transition-all shrink-0 bg-muted border border-border" onClick={() => handleSelectAutoThumb(t)} />
+                           ))}
+                         </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex-1 flex flex-col">
                   <label className="text-xs font-semibold text-muted-foreground uppercase mb-1 block">Descrição</label>
-                  <textarea className="flex flex-1 min-h-[120px] w-full rounded-md border border-input bg-background/50 px-3 py-2 text-sm focus:ring-1 focus:ring-primary resize-none shadow-sm" value={description} onChange={e => setDescription(e.target.value)} />
+                  <textarea className="flex flex-1 min-h-[120px] w-full rounded-md border border-input bg-white text-black px-3 py-2 text-sm focus:ring-1 focus:ring-primary resize-none shadow-sm" value={description} onChange={e => setDescription(e.target.value)} />
                 </div>
               </CardContent>
             </Card>
@@ -502,7 +627,7 @@ export default function VideoEditorPage() {
             </div>
 
             {/* ACTION CENTER */}
-            <div className="flex-1 bg-background/50 p-6 relative">
+            <div className="flex-1 bg-white dark:bg-background p-6 relative">
               
               {/* If Dragging something, show hint */}
               {dragState ? (

@@ -1,23 +1,39 @@
-import { pgTable, serial, text, integer, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, boolean, unique } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  isEmailVerified: boolean("is_email_verified").notNull().default(false),
+  verificationCode: text("verification_code"),
+  verificationCodeExpiresAt: timestamp("verification_code_expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
+export const stores = pgTable("stores", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  ownerId: integer("owner_id").references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  allowedDomain: text("allowed_domain"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type Store = typeof stores.$inferSelect;
+export type NewStore = typeof stores.$inferInsert;
+
 export const media = pgTable("media", {
   id: serial("id").primaryKey(),
-  filename: text("filename").notNull().unique(),   // UUID gerado no servidor
+  storeId: integer("store_id").references(() => stores.id, { onDelete: 'cascade' }),
+  filename: text("filename").notNull().unique(),
   originalName: text("original_name").notNull(),
   mimeType: text("mime_type").notNull(),
-  size: integer("size").notNull(),                 // bytes
-  url: text("url").notNull(),                      // /uploads/<filename>
+  size: integer("size").notNull(),
+  url: text("url").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -26,24 +42,28 @@ export type NewMedia = typeof media.$inferInsert;
 
 export const products = pgTable("products", {
   id: serial("id").primaryKey(),
-  externalId: text("external_id").notNull().unique(), // g:id
-  title: text("title").notNull(),                     // g:title
-  description: text("description"),                   // g:description
-  price: text("price"),                               // g:price
-  imageLink: text("image_link"),                      // g:image_link
-  link: text("link"),                                 // g:link
-  brand: text("brand"),                               // g:brand
-  availability: text("availability"),                 // g:availability
-  condition: text("condition"),                       // g:condition
+  storeId: integer("store_id").references(() => stores.id, { onDelete: 'cascade' }),
+  externalId: text("external_id").notNull(), // removed unique() because it will be unique per store
+  title: text("title").notNull(),
+  description: text("description"),
+  price: text("price"),
+  imageLink: text("image_link"),
+  link: text("link"),
+  brand: text("brand"),
+  availability: text("availability"),
+  condition: text("condition"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  unq: unique("product_store_external_idx").on(t.storeId, t.externalId)
+}));
 
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 
 export const catalogImports = pgTable("catalog_imports", {
   id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: 'cascade' }),
   sourceType: text("source_type").notNull(), // 'file', 'url'
   sourceUrl: text("source_url"),
   status: text("status").notNull().default("pending"), // pending, processing, completed, failed
@@ -58,6 +78,7 @@ export type NewCatalogImport = typeof catalogImports.$inferInsert;
 
 export const catalogSyncs = pgTable("catalog_syncs", {
   id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: 'cascade' }),
   url: text("url").notNull(),
   frequencyDays: integer("frequency_days").notNull(),
   syncTime: text("sync_time").notNull(),
@@ -69,6 +90,7 @@ export const catalogSyncs = pgTable("catalog_syncs", {
 
 export const shoppableVideos = pgTable("shoppable_videos", {
   id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: 'cascade' }),
   mediaUrl: text("media_url").notNull(),
   thumbnailUrl: text("thumbnail_url"),
   title: text("title").notNull(),
@@ -93,6 +115,7 @@ export type NewVideoProduct = typeof videoProducts.$inferInsert;
 
 export const videoCarousels = pgTable("video_carousels", {
   id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: 'cascade' }),
   name: text("name").notNull(),
   title: text("title"),
   subtitle: text("subtitle"),

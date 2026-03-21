@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api";
 import { useState, useEffect } from "react";
 import { Loader2, Plus, Edit, Trash2, Video, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ export default function VideosPage() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch("/api/videos", {
+      const res = await apiFetch("/api/videos", {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
@@ -43,7 +44,7 @@ export default function VideosPage() {
     if (!window.confirm("Certeza que deseja excluir este vídeo interactivo?")) return;
     try {
       const token = localStorage.getItem("token");
-      await fetch(`/api/videos/${id}`, {
+      await apiFetch(`/api/videos/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });

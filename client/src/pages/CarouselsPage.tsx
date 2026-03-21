@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Edit, Trash2, Loader2, LayoutGrid, Package, Eye, EyeOff, Code2, Copy, Check, X } from "lucide-react";
@@ -90,7 +91,7 @@ export default function CarouselsPage() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch("/api/carousels", {
+      const res = await apiFetch("/api/carousels", {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) setCarousels((await res.json()).carousels || []);
@@ -104,7 +105,7 @@ export default function CarouselsPage() {
   const handleDelete = async (id: number) => {
     if (!window.confirm("Deseja excluir este carrossel?")) return;
     const token = localStorage.getItem("token");
-    await fetch(`/api/carousels/${id}`, {
+    await apiFetch(`/api/carousels/${id}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` }
     });

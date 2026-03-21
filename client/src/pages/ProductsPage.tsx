@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api";
 import { useState, useEffect } from "react";
 import { Search, Loader2, Edit, Trash2, PackageOpen, X, ImageIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -60,7 +61,7 @@ export default function ProductsPage() {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`/api/products?page=${page}&limit=${limit}&search=${encodeURIComponent(debouncedSearch)}`, {
+      const res = await apiFetch(`/api/products?page=${page}&limit=${limit}&search=${encodeURIComponent(debouncedSearch)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
@@ -82,7 +83,7 @@ export default function ProductsPage() {
     if (!window.confirm("Certeza que deseja remover este produto?")) return;
     try {
       const token = localStorage.getItem("token");
-      await fetch(`/api/products/${id}`, {
+      await apiFetch(`/api/products/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -99,7 +100,7 @@ export default function ProductsPage() {
     setIsSaving(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`/api/products/${editingProduct.id}`, {
+      const res = await apiFetch(`/api/products/${editingProduct.id}`, {
         method: "PUT",
         headers: { 
           "Content-Type": "application/json",

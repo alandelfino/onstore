@@ -1,9 +1,14 @@
-import { BarChart3, ShoppingCart, Users, TrendingUp, TrendingDown } from "lucide-react";
+import { BarChart3, ShoppingCart, Users, TrendingUp, TrendingDown, Save, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { useState, useEffect } from "react";
+import { useStore } from "../context/StoreContext";
+import { apiFetch } from "@/lib/api";
 
 const kpis = [
   { label: "Receita Total", value: "R$ 48.291", change: "+12,5%", up: true, icon: BarChart3 },

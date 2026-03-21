@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -54,7 +55,7 @@ export default function CarouselEditorPage() {
     const load = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await fetch(`/api/carousels/${id}`, {
+        const res = await apiFetch(`/api/carousels/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!res.ok) { navigate("/dashboard/carousels"); return; }
@@ -82,7 +83,7 @@ export default function CarouselEditorPage() {
     setSearching(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch("/api/videos", {
+      const res = await apiFetch("/api/videos", {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
@@ -129,21 +130,21 @@ export default function CarouselEditorPage() {
       };
 
       if (isNew) {
-        const createRes = await fetch("/api/carousels", {
+        const createRes = await apiFetch("/api/carousels", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime })
         });
         if (!createRes.ok) throw new Error("Erro ao criar carrossel");
         const created = await createRes.json();
-        await fetch(`/api/carousels/${created.carousel.id}`, {
+        await apiFetch(`/api/carousels/${created.carousel.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload)
         });
         navigate(`/dashboard/carousels/edit/${created.carousel.id}`, { replace: true });
       } else {
-        const res = await fetch(`/api/carousels/${id}`, {
+        const res = await apiFetch(`/api/carousels/${id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload)

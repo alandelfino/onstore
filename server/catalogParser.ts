@@ -5,7 +5,8 @@ import { eq, sql } from "drizzle-orm";
 
 export async function parseCatalogStream(
   stream: NodeJS.ReadableStream,
-  importId: number
+  importId: number,
+  storeId: number
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const parser = sax.createStream(true, { trim: false });
@@ -52,6 +53,7 @@ export async function parseCatalogStream(
       }
 
       if (tagName === "item" && currentItem && currentItem.externalId && currentItem.title) {
+        currentItem.storeId = storeId;
         itemsBatch.push(currentItem as NewProduct);
         currentItem = null;
         totalProcessed++;
@@ -67,7 +69,7 @@ export async function parseCatalogStream(
             await db.insert(products)
               .values(batchToInsert)
               .onConflictDoUpdate({
-                 target: products.externalId,
+                 target: [products.storeId, products.externalId],
                  set: {
                    title: sql`excluded.title`,
                    description: sql`excluded.description`,
@@ -105,7 +107,7 @@ export async function parseCatalogStream(
           await db.insert(products)
             .values(itemsBatch)
             .onConflictDoUpdate({
-                 target: products.externalId,
+                 target: [products.storeId, products.externalId],
                  set: {
                    title: sql`excluded.title`,
                    description: sql`excluded.description`,

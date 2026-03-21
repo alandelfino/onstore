@@ -5,7 +5,7 @@ var __export = (target, all) => {
 };
 
 // server/index.ts
-import dotenv2 from "dotenv";
+import dotenv3 from "dotenv";
 import express2 from "express";
 import cors from "cors";
 import { createServer } from "http";
@@ -44,7 +44,7 @@ async function setupVite(app2, server2) {
 // server/routes.ts
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { eq as eq3, desc, ilike, or, sql as sql2, inArray } from "drizzle-orm";
+import { eq as eq3, desc, ilike, or, sql as sql2, inArray, and } from "drizzle-orm";
 
 // server/db.ts
 import { Pool } from "pg";
@@ -59,55 +59,61 @@ __export(schema_exports, {
   media: () => media,
   products: () => products,
   shoppableVideos: () => shoppableVideos,
+  stores: () => stores,
   users: () => users,
   videoCarousels: () => videoCarousels,
   videoProducts: () => videoProducts
 });
-import { pgTable, serial, text, integer, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, boolean, unique } from "drizzle-orm/pg-core";
 var users = pgTable("users", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  isEmailVerified: boolean("is_email_verified").notNull().default(false),
+  verificationCode: text("verification_code"),
+  verificationCodeExpiresAt: timestamp("verification_code_expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull()
+});
+var stores = pgTable("stores", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  ownerId: integer("owner_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  allowedDomain: text("allowed_domain"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull()
 });
 var media = pgTable("media", {
   id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: "cascade" }),
   filename: text("filename").notNull().unique(),
-  // UUID gerado no servidor
   originalName: text("original_name").notNull(),
   mimeType: text("mime_type").notNull(),
   size: integer("size").notNull(),
-  // bytes
   url: text("url").notNull(),
-  // /uploads/<filename>
   createdAt: timestamp("created_at").defaultNow().notNull()
 });
 var products = pgTable("products", {
   id: serial("id").primaryKey(),
-  externalId: text("external_id").notNull().unique(),
-  // g:id
+  storeId: integer("store_id").references(() => stores.id, { onDelete: "cascade" }),
+  externalId: text("external_id").notNull(),
+  // removed unique() because it will be unique per store
   title: text("title").notNull(),
-  // g:title
   description: text("description"),
-  // g:description
   price: text("price"),
-  // g:price
   imageLink: text("image_link"),
-  // g:image_link
   link: text("link"),
-  // g:link
   brand: text("brand"),
-  // g:brand
   availability: text("availability"),
-  // g:availability
   condition: text("condition"),
-  // g:condition
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull()
-});
+}, (t) => ({
+  unq: unique("product_store_external_idx").on(t.storeId, t.externalId)
+}));
 var catalogImports = pgTable("catalog_imports", {
   id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: "cascade" }),
   sourceType: text("source_type").notNull(),
   // 'file', 'url'
   sourceUrl: text("source_url"),
@@ -120,6 +126,7 @@ var catalogImports = pgTable("catalog_imports", {
 });
 var catalogSyncs = pgTable("catalog_syncs", {
   id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: "cascade" }),
   url: text("url").notNull(),
   frequencyDays: integer("frequency_days").notNull(),
   syncTime: text("sync_time").notNull(),
@@ -130,6 +137,7 @@ var catalogSyncs = pgTable("catalog_syncs", {
 });
 var shoppableVideos = pgTable("shoppable_videos", {
   id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: "cascade" }),
   mediaUrl: text("media_url").notNull(),
   thumbnailUrl: text("thumbnail_url"),
   title: text("title").notNull(),
@@ -147,6 +155,7 @@ var videoProducts = pgTable("video_products", {
 });
 var videoCarousels = pgTable("video_carousels", {
   id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   title: text("title"),
   subtitle: text("subtitle"),
@@ -217,6 +226,36 @@ var upload = multer({
   // 100 MB
 });
 
+// server/email.ts
+import { Resend } from "resend";
+import dotenv2 from "dotenv";
+dotenv2.config();
+var resend = new Resend(process.env.RESEND_API_TOKEN);
+async function sendVerificationEmail(to, code) {
+  try {
+    const data = await resend.emails.send({
+      from: "VidShop <onboarding@resend.dev>",
+      // replace with your verified domain in production
+      to: [to],
+      subject: "VidShop - C\xF3digo de Verifica\xE7\xE3o",
+      html: `
+        <div style="font-family: sans-serif; padding: 20px;">
+          <h2>Bem-vindo \xE0 VidShop!</h2>
+          <p>Para ativar sua conta e come\xE7ar a gerenciar suas lojas, utilize o c\xF3digo de verifica\xE7\xE3o abaixo:</p>
+          <div style="margin: 20px 0; padding: 15px; background: #f4f4f5; font-size: 24px; font-weight: bold; letter-spacing: 5px; text-align: center; border-radius: 8px;">
+            ${code}
+          </div>
+          <p>Este c\xF3digo \xE9 v\xE1lido pelas pr\xF3ximas 24 horas.</p>
+        </div>
+      `
+    });
+    return data;
+  } catch (error) {
+    console.error("Erro ao enviar email:", error);
+    throw error;
+  }
+}
+
 // server/routes.ts
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 
@@ -228,7 +267,7 @@ import { eq as eq2 } from "drizzle-orm";
 // server/catalogParser.ts
 import sax from "sax";
 import { eq, sql } from "drizzle-orm";
-async function parseCatalogStream(stream, importId) {
+async function parseCatalogStream(stream, importId, storeId) {
   return new Promise((resolve, reject) => {
     const parser = sax.createStream(true, { trim: false });
     let currentTag = null;
@@ -285,6 +324,7 @@ async function parseCatalogStream(stream, importId) {
         }
       }
       if (tagName === "item" && currentItem && currentItem.externalId && currentItem.title) {
+        currentItem.storeId = storeId;
         itemsBatch.push(currentItem);
         currentItem = null;
         totalProcessed++;
@@ -295,7 +335,7 @@ async function parseCatalogStream(stream, importId) {
           stream.pause();
           try {
             await db.insert(products).values(batchToInsert).onConflictDoUpdate({
-              target: products.externalId,
+              target: [products.storeId, products.externalId],
               set: {
                 title: sql`excluded.title`,
                 description: sql`excluded.description`,
@@ -326,7 +366,7 @@ async function parseCatalogStream(stream, importId) {
       try {
         if (itemsBatch.length > 0) {
           await db.insert(products).values(itemsBatch).onConflictDoUpdate({
-            target: products.externalId,
+            target: [products.storeId, products.externalId],
             set: {
               title: sql`excluded.title`,
               description: sql`excluded.description`,
@@ -394,7 +434,9 @@ async function processQueue() {
         } else {
           throw new Error("Source type inv\xE1lido.");
         }
-        await parseCatalogStream(stream, job.id);
+        if (!job.storeId)
+          throw new Error("Store ID inv\xE1lido no job.");
+        await parseCatalogStream(stream, job.id, job.storeId);
       } catch (err) {
         console.error("Queue job error:", err);
         await db.update(catalogImports).set({ status: "failed", error: err.message || "Erro desconhecido", updatedAt: /* @__PURE__ */ new Date() }).where(eq2(catalogImports.id, job.id));
@@ -1069,11 +1111,33 @@ function registerRoutes(app2) {
       return;
     }
     const passwordHash = await bcrypt.hash(password, 12);
-    const [user] = await db.insert(users).values({ name, email, passwordHash }).returning({ id: users.id, name: users.name, email: users.email });
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
-      expiresIn: "7d"
-    });
-    res.status(201).json({ token, user });
+    const verificationCode = Math.floor(1e5 + Math.random() * 9e5).toString();
+    const verificationCodeExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1e3);
+    const [user] = await db.insert(users).values({ name, email, passwordHash, verificationCode, verificationCodeExpiresAt, isEmailVerified: false }).returning({ id: users.id, name: users.name, email: users.email });
+    try {
+      await sendVerificationEmail(email, verificationCode);
+    } catch (e) {
+      console.error("Failed to send verification email during register", e);
+    }
+    res.status(201).json({ message: "Registration successful. Please verify your email.", user });
+  });
+  app2.post("/api/auth/verify", async (req, res) => {
+    const { email, code } = req.body;
+    if (!email || !code)
+      return res.status(400).json({ error: "E-mail e c\xF3digo s\xE3o obrigat\xF3rios." });
+    const [user] = await db.select().from(users).where(eq3(users.email, email)).limit(1);
+    if (!user)
+      return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
+    if (user.isEmailVerified)
+      return res.status(400).json({ error: "E-mail j\xE1 verificado." });
+    if (user.verificationCode !== code)
+      return res.status(400).json({ error: "C\xF3digo inv\xE1lido." });
+    if (user.verificationCodeExpiresAt && /* @__PURE__ */ new Date() > user.verificationCodeExpiresAt) {
+      return res.status(400).json({ error: "C\xF3digo expirado." });
+    }
+    await db.update(users).set({ isEmailVerified: true, verificationCode: null, verificationCodeExpiresAt: null }).where(eq3(users.id, user.id));
+    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
   });
   app2.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
@@ -1084,6 +1148,10 @@ function registerRoutes(app2) {
     const [user] = await db.select().from(users).where(eq3(users.email, email)).limit(1);
     if (!user || !await bcrypt.compare(password, user.passwordHash)) {
       res.status(401).json({ error: "Credenciais inv\xE1lidas" });
+      return;
+    }
+    if (!user.isEmailVerified) {
+      res.status(403).json({ error: "Por favor, verifique seu e-mail antes de fazer login." });
       return;
     }
     const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
@@ -1100,6 +1168,35 @@ function registerRoutes(app2) {
     }
     res.json({ user });
   });
+  app2.get("/api/stores", authMiddleware, async (req, res) => {
+    const payload = req.user;
+    const myStores = await db.select().from(stores).where(eq3(stores.ownerId, payload.userId)).orderBy(desc(stores.createdAt));
+    res.json({ stores: myStores });
+  });
+  app2.post("/api/stores", authMiddleware, async (req, res) => {
+    const payload = req.user;
+    const { name, allowedDomain } = req.body;
+    if (!name)
+      return res.status(400).json({ error: "Nome da loja \xE9 obrigat\xF3rio" });
+    const [store] = await db.insert(stores).values({ name, allowedDomain, ownerId: payload.userId }).returning();
+    res.status(201).json({ store });
+  });
+  app2.put("/api/stores/:id", authMiddleware, async (req, res) => {
+    const payload = req.user;
+    const storeId = parseInt(req.params.id);
+    const { name, allowedDomain } = req.body;
+    const [existing] = await db.select().from(stores).where(and(eq3(stores.id, storeId), eq3(stores.ownerId, payload.userId))).limit(1);
+    if (!existing)
+      return res.status(404).json({ error: "Loja n\xE3o encontrada ou acesso negado." });
+    const [store] = await db.update(stores).set({ name, allowedDomain, updatedAt: /* @__PURE__ */ new Date() }).where(eq3(stores.id, storeId)).returning();
+    res.json({ store });
+  });
+  function getStoreId(req) {
+    const storeId = req.headers["x-store-id"];
+    if (!storeId)
+      throw new Error("x-store-id header is missing");
+    return parseInt(storeId);
+  }
   app2.post(
     "/api/media/upload",
     authMiddleware,
@@ -1113,6 +1210,7 @@ function registerRoutes(app2) {
       });
     },
     async (req, res) => {
+      const storeId = getStoreId(req);
       const file = req.file;
       if (!file) {
         res.status(400).json({ error: "Nenhum arquivo enviado." });
@@ -1121,6 +1219,7 @@ function registerRoutes(app2) {
       const publicDomain = process.env.CLOUDFLARE_R2_PUBLIC_DOMAIN;
       const url = publicDomain ? `${publicDomain}/${file.key}` : file.location;
       const [inserted] = await db.insert(media).values({
+        storeId,
         filename: file.key,
         // multer-s3 uses 'key' instead of 'filename'
         originalName: file.originalname,
@@ -1131,17 +1230,19 @@ function registerRoutes(app2) {
       res.status(201).json({ media: inserted });
     }
   );
-  app2.get("/api/media", authMiddleware, async (_req, res) => {
-    const items = await db.select().from(media).orderBy(desc(media.createdAt));
+  app2.get("/api/media", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
+    const items = await db.select().from(media).where(eq3(media.storeId, storeId)).orderBy(desc(media.createdAt));
     res.json({ media: items });
   });
   app2.delete("/api/media/:id", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
       res.status(400).json({ error: "ID inv\xE1lido" });
       return;
     }
-    const [item] = await db.select().from(media).where(eq3(media.id, id)).limit(1);
+    const [item] = await db.select().from(media).where(and(eq3(media.id, id), eq3(media.storeId, storeId))).limit(1);
     if (!item) {
       res.status(404).json({ error: "M\xEDdia n\xE3o encontrada" });
       return;
@@ -1157,7 +1258,7 @@ function registerRoutes(app2) {
     } catch (error) {
       console.error("Erro ao deletar arquivo do R2:", error);
     }
-    await db.delete(media).where(eq3(media.id, id));
+    await db.delete(media).where(and(eq3(media.id, id), eq3(media.storeId, storeId)));
     res.json({ success: true });
   });
   app2.post(
@@ -1165,6 +1266,7 @@ function registerRoutes(app2) {
     authMiddleware,
     xmlUpload.single("file"),
     async (req, res) => {
+      const storeId = getStoreId(req);
       const file = req.file;
       const { url } = req.body;
       if (!file && !url) {
@@ -1173,20 +1275,22 @@ function registerRoutes(app2) {
       }
       let job;
       if (file) {
-        [job] = await db.insert(catalogImports).values({ sourceType: "file", sourceUrl: file.filename }).returning();
+        [job] = await db.insert(catalogImports).values({ storeId, sourceType: "file", sourceUrl: file.filename }).returning();
       } else {
-        [job] = await db.insert(catalogImports).values({ sourceType: "url", sourceUrl: url }).returning();
+        [job] = await db.insert(catalogImports).values({ storeId, sourceType: "url", sourceUrl: url }).returning();
       }
       processQueue().catch(console.error);
       res.status(202).json({ job, message: "Importa\xE7\xE3o adicionada \xE0 fila." });
     }
   );
-  app2.get("/api/catalog/imports", authMiddleware, async (_req, res) => {
-    const list = await db.select().from(catalogImports).orderBy(desc(catalogImports.createdAt));
+  app2.get("/api/catalog/imports", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
+    const list = await db.select().from(catalogImports).where(eq3(catalogImports.storeId, storeId)).orderBy(desc(catalogImports.createdAt));
     res.json({ imports: list });
   });
   app2.post("/api/catalog/sync", authMiddleware, async (req, res) => {
     try {
+      const storeId = getStoreId(req);
       const { url, frequencyDays, syncTime } = req.body;
       if (!url || !frequencyDays || !syncTime) {
         return res.status(400).json({ error: "Par\xE2metros de configura\xE7\xE3o inv\xE1lidos." });
@@ -1199,12 +1303,14 @@ function registerRoutes(app2) {
         nextSync.setDate(nextSync.getDate() + 1);
       }
       const [syncRecord] = await db.insert(catalogSyncs).values({
+        storeId,
         url,
         frequencyDays,
         syncTime,
         nextSyncAt: nextSync
       }).returning();
       const [importJob] = await db.insert(catalogImports).values({
+        storeId,
         sourceType: "url",
         sourceUrl: url,
         status: "pending"
@@ -1215,11 +1321,13 @@ function registerRoutes(app2) {
     }
   });
   app2.get("/api/catalog/syncs", authMiddleware, async (req, res) => {
-    const list = await db.select().from(catalogSyncs).orderBy(desc(catalogSyncs.createdAt));
+    const storeId = getStoreId(req);
+    const list = await db.select().from(catalogSyncs).where(eq3(catalogSyncs.storeId, storeId)).orderBy(desc(catalogSyncs.createdAt));
     res.json({ syncs: list });
   });
   app2.delete("/api/catalog/syncs/:id", authMiddleware, async (req, res) => {
-    await db.delete(catalogSyncs).where(eq3(catalogSyncs.id, parseInt(req.params.id)));
+    const storeId = getStoreId(req);
+    await db.delete(catalogSyncs).where(and(eq3(catalogSyncs.id, parseInt(req.params.id)), eq3(catalogSyncs.storeId, storeId)));
     res.sendStatus(204);
   });
   app2.get("/api/public/carousels/:id", async (req, res) => {
@@ -1233,6 +1341,15 @@ function registerRoutes(app2) {
       const [carousel] = await db.select().from(videoCarousels).where(eq3(videoCarousels.id, carouselId));
       if (!carousel)
         return res.status(404).json({ error: "Carrossel n\xE3o encontrado" });
+      if (carousel.storeId) {
+        const [store] = await db.select().from(stores).where(eq3(stores.id, carousel.storeId));
+        if (store && store.allowedDomain) {
+          const origin = req.headers.origin || req.headers.referer;
+          if (origin && !origin.includes(store.allowedDomain)) {
+            return res.status(403).json({ error: "Dom\xEDnio n\xE3o autorizado para este carrossel." });
+          }
+        }
+      }
       const cv = await db.select({
         videoId: carouselVideos.videoId,
         position: carouselVideos.position,
@@ -1281,13 +1398,15 @@ function registerRoutes(app2) {
     const origin = process.env.PUBLIC_URL || "";
     res.send(publicScript.replace("__API_ORIGIN__", origin));
   });
-  app2.get("/api/carousels", authMiddleware, async (_req, res) => {
-    const list = await db.select().from(videoCarousels).orderBy(desc(videoCarousels.createdAt));
+  app2.get("/api/carousels", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
+    const list = await db.select().from(videoCarousels).where(eq3(videoCarousels.storeId, storeId)).orderBy(desc(videoCarousels.createdAt));
     res.json({ carousels: list });
   });
   app2.get("/api/carousels/:id", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
     const carouselId = parseInt(req.params.id);
-    const [carousel] = await db.select().from(videoCarousels).where(eq3(videoCarousels.id, carouselId));
+    const [carousel] = await db.select().from(videoCarousels).where(and(eq3(videoCarousels.id, carouselId), eq3(videoCarousels.storeId, storeId)));
     if (!carousel)
       return res.status(404).json({ error: "Carrossel n\xE3o encontrado" });
     const cv = await db.select({
@@ -1306,8 +1425,10 @@ function registerRoutes(app2) {
   });
   app2.post("/api/carousels", authMiddleware, async (req, res) => {
     try {
+      const storeId = getStoreId(req);
       const { name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime } = req.body;
       const [carousel] = await db.insert(videoCarousels).values({
+        storeId,
         name: name || "Novo Carrossel",
         title,
         subtitle,
@@ -1323,10 +1444,11 @@ function registerRoutes(app2) {
     }
   });
   app2.put("/api/carousels/:id", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
     const carouselId = parseInt(req.params.id);
     const { name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime, videoIds } = req.body;
     try {
-      const [updated] = await db.update(videoCarousels).set({ name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime, updatedAt: /* @__PURE__ */ new Date() }).where(eq3(videoCarousels.id, carouselId)).returning();
+      const [updated] = await db.update(videoCarousels).set({ name, title, subtitle, titleColor, subtitleColor, layout, showProducts, previewTime, updatedAt: /* @__PURE__ */ new Date() }).where(and(eq3(videoCarousels.id, carouselId), eq3(videoCarousels.storeId, storeId))).returning();
       if (!updated)
         return res.status(404).json({ error: "Carrossel n\xE3o encontrado" });
       if (videoIds && Array.isArray(videoIds)) {
@@ -1349,18 +1471,21 @@ function registerRoutes(app2) {
     }
   });
   app2.delete("/api/carousels/:id", authMiddleware, async (req, res) => {
-    await db.delete(videoCarousels).where(eq3(videoCarousels.id, parseInt(req.params.id)));
+    const storeId = getStoreId(req);
+    await db.delete(videoCarousels).where(and(eq3(videoCarousels.id, parseInt(req.params.id)), eq3(videoCarousels.storeId, storeId)));
     const publicUrl = process.env.PUBLIC_URL || "http://localhost:5000";
     purgeCloudflareCache([`${publicUrl}/api/public/carousels/${parseInt(req.params.id)}`]);
     res.sendStatus(204);
   });
-  app2.get("/api/videos", authMiddleware, async (_req, res) => {
-    const list = await db.select().from(shoppableVideos).orderBy(desc(shoppableVideos.createdAt));
+  app2.get("/api/videos", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
+    const list = await db.select().from(shoppableVideos).where(eq3(shoppableVideos.storeId, storeId)).orderBy(desc(shoppableVideos.createdAt));
     res.json({ videos: list });
   });
   app2.get("/api/videos/:id", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
     const videoId = parseInt(req.params.id);
-    const [video] = await db.select().from(shoppableVideos).where(eq3(shoppableVideos.id, videoId));
+    const [video] = await db.select().from(shoppableVideos).where(and(eq3(shoppableVideos.id, videoId), eq3(shoppableVideos.storeId, storeId)));
     if (!video)
       return res.status(404).json({ error: "V\xEDdeo n\xE3o encontrado" });
     const vp = await db.select({
@@ -1380,18 +1505,20 @@ function registerRoutes(app2) {
   });
   app2.post("/api/videos", authMiddleware, async (req, res) => {
     try {
+      const storeId = getStoreId(req);
       const { title, description, mediaUrl, thumbnailUrl } = req.body;
-      const [video] = await db.insert(shoppableVideos).values({ title: title || "Novo V\xEDdeo", description, mediaUrl, thumbnailUrl }).returning();
+      const [video] = await db.insert(shoppableVideos).values({ storeId, title: title || "Novo V\xEDdeo", description, mediaUrl, thumbnailUrl }).returning();
       res.status(201).json({ video });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
   });
   app2.put("/api/videos/:id", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
     const videoId = parseInt(req.params.id);
     const { title, description, mediaUrl, thumbnailUrl, productsList } = req.body;
     try {
-      const [updated] = await db.update(shoppableVideos).set({ title, description, mediaUrl, thumbnailUrl }).where(eq3(shoppableVideos.id, videoId)).returning();
+      const [updated] = await db.update(shoppableVideos).set({ title, description, mediaUrl, thumbnailUrl }).where(and(eq3(shoppableVideos.id, videoId), eq3(shoppableVideos.storeId, storeId))).returning();
       if (!updated)
         return res.status(404).json({ error: "V\xEDdeo n\xE3o encontrado" });
       if (productsList && Array.isArray(productsList)) {
@@ -1418,19 +1545,24 @@ function registerRoutes(app2) {
     }
   });
   app2.delete("/api/videos/:id", authMiddleware, async (req, res) => {
-    await db.delete(shoppableVideos).where(eq3(shoppableVideos.id, parseInt(req.params.id)));
+    const storeId = getStoreId(req);
+    await db.delete(shoppableVideos).where(and(eq3(shoppableVideos.id, parseInt(req.params.id)), eq3(shoppableVideos.storeId, storeId)));
     res.sendStatus(204);
   });
   app2.get("/api/products", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
     const search = req.query.search || "";
     const offset = (page - 1) * limit;
-    let condition = void 0;
+    let condition = eq3(products.storeId, storeId);
     if (search) {
-      condition = or(
-        ilike(products.title, `%${search}%`),
-        ilike(products.externalId, `%${search}%`)
+      condition = and(
+        eq3(products.storeId, storeId),
+        or(
+          ilike(products.title, `%${search}%`),
+          ilike(products.externalId, `%${search}%`)
+        )
       );
     }
     const [countResult] = await db.select({ count: sql2`count(*)`.mapWith(Number) }).from(products).where(condition);
@@ -1439,6 +1571,7 @@ function registerRoutes(app2) {
     res.json({ products: list, total, page, totalPages: Math.ceil(total / limit) || 1 });
   });
   app2.put("/api/products/:id", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
       res.status(400).json({ error: "ID inv\xE1lido" });
@@ -1455,7 +1588,7 @@ function registerRoutes(app2) {
       link,
       imageLink,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq3(products.id, id)).returning();
+    }).where(and(eq3(products.id, id), eq3(products.storeId, storeId))).returning();
     if (!updated) {
       res.status(404).json({ error: "Produto n\xE3o encontrado" });
       return;
@@ -1463,12 +1596,13 @@ function registerRoutes(app2) {
     res.json({ product: updated });
   });
   app2.delete("/api/products/:id", authMiddleware, async (req, res) => {
+    const storeId = getStoreId(req);
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
       res.status(400).json({ error: "ID inv\xE1lido" });
       return;
     }
-    const [deleted] = await db.delete(products).where(eq3(products.id, id)).returning();
+    const [deleted] = await db.delete(products).where(and(eq3(products.id, id), eq3(products.storeId, storeId))).returning();
     if (!deleted) {
       res.status(404).json({ error: "Produto n\xE3o encontrado" });
       return;
@@ -1478,12 +1612,12 @@ function registerRoutes(app2) {
 }
 
 // server/syncScheduler.ts
-import { eq as eq4, and, lte } from "drizzle-orm";
+import { eq as eq4, and as and2, lte } from "drizzle-orm";
 function startSyncScheduler() {
   setInterval(async () => {
     try {
       const pendingSyncs = await db.select().from(catalogSyncs).where(
-        and(
+        and2(
           eq4(catalogSyncs.isActive, true),
           lte(catalogSyncs.nextSyncAt, /* @__PURE__ */ new Date())
         )
@@ -1510,7 +1644,7 @@ function startSyncScheduler() {
 // server/index.ts
 import path4 from "path";
 import { eq as eq5 } from "drizzle-orm";
-dotenv2.config();
+dotenv3.config();
 var app = express2();
 app.use(cors({ origin: "*" }));
 var server = createServer(app);

@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const navigate = useNavigate();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -18,32 +19,32 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
 
-    if (!email.trim() || !password.trim()) {
-      setError("Preencha e-mail e senha para continuar.");
+    if (!name.trim() || !email.trim() || !password.trim()) {
+      setError("Preencha todos os campos para continuar.");
+      return;
+    }
+
+    if (password.length < 8) {
+      setError("A senha deve ter pelo menos 8 caracteres.");
       return;
     }
 
     setIsPending(true);
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ name, email, password }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        if (res.status === 403 && data.unverified) {
-           navigate("/verify", { state: { email } });
-           return;
-        }
-        setError(data.error || "Erro ao autenticar.");
+        setError(data.error || "Erro ao registrar.");
         return;
       }
 
-      localStorage.setItem("token", data.token);
-      navigate("/dashboard");
+      navigate("/verify", { state: { email } });
     } catch {
       setError("Erro de conexão. Tente novamente.");
     } finally {
@@ -53,7 +54,6 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-8">
-      {/* Brand */}
       <div className="flex items-center gap-2 mb-8">
         <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center">
           <ShoppingBag className="w-5 h-5 text-primary-foreground" />
@@ -61,18 +61,28 @@ export default function LoginPage() {
         <span className="text-xl font-bold tracking-tight text-foreground">Vidshop</span>
       </div>
 
-      {/* Card */}
       <Card className="w-full max-w-sm shadow-sm">
         <CardHeader className="pb-4">
-          <CardTitle className="text-xl">Bem-vindo de volta</CardTitle>
+          <CardTitle className="text-xl">Criar Conta</CardTitle>
           <CardDescription>
-            Entre com sua conta para acessar o painel.
+            Cadastre-se para criar e gerenciar suas lojas.
           </CardDescription>
         </CardHeader>
 
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {/* Email */}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="name">Nome completo</Label>
+              <Input
+                id="name"
+                type="text"
+                placeholder="Seu nome"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={isPending}
+              />
+            </div>
+
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="email">E-mail</Label>
               <Input
@@ -82,11 +92,9 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isPending}
-                autoComplete="email"
               />
             </div>
 
-            {/* Password */}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="password">Senha</Label>
               <div className="relative">
@@ -97,7 +105,6 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={isPending}
-                  autoComplete="current-password"
                   className="pr-10"
                 />
                 <button
@@ -106,35 +113,32 @@ export default function LoginPage() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors duration-150"
                   tabIndex={-1}
                 >
-                  {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                A senha deve conter no mínimo 8 caracteres.
+              </p>
             </div>
 
-            {/* Error */}
             {error && (
               <p className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md px-3 py-2">
                 {error}
               </p>
             )}
 
-            {/* Submit */}
             <Button type="submit" disabled={isPending} className="w-full mt-1 min-h-[44px]">
               {isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-              {isPending ? "Entrando..." : "Entrar"}
+              {isPending ? "Criando conta..." : "Criar conta"}
             </Button>
           </form>
         </CardContent>
       </Card>
 
       <p className="text-xs text-muted-foreground mt-6">
-        Não tem conta?{" "}
-        <button type="button" onClick={() => navigate("/register")} className="text-primary hover:underline transition-all duration-150 font-medium">
-          Cadastre-se
+        Já tem uma conta?{" "}
+        <button onClick={() => navigate("/")} className="text-primary hover:underline transition-all duration-150 font-medium">
+          Faça login
         </button>
       </p>
     </div>

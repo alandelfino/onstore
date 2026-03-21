@@ -9,6 +9,11 @@ import VideosPage from "./pages/VideosPage";
 import VideoEditorPage from "./pages/VideoEditorPage";
 import CarouselsPage from "./pages/CarouselsPage";
 import CarouselEditorPage from "./pages/CarouselEditorPage";
+import RegisterPage from "./pages/RegisterPage";
+import VerifyEmailPage from "./pages/VerifyEmailPage";
+import StoresPage from "./pages/StoresPage";
+import StoreSettingsPage from "./pages/StoreSettingsPage";
+import { StoreProvider } from "./context/StoreContext";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("token");
@@ -17,18 +22,22 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<LoginPage />} />
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <StoreProvider>
+        <Routes>
+          <Route path="/" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/verify" element={<VerifyEmailPage />} />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
               <DashboardPage />
             </ProtectedRoute>
           }
         >
           <Route index element={<DashboardHome />} />
+          <Route path="stores" element={<StoresPage />} />
           <Route path="media" element={<MediaPage />} />
           <Route path="import" element={<ImportProductsPage />} />
           <Route path="products" element={<ProductsPage />} />
@@ -38,6 +47,7 @@ export default function App() {
           <Route path="carousels" element={<CarouselsPage />} />
           <Route path="carousels/new" element={<CarouselEditorPage />} />
           <Route path="carousels/edit/:id" element={<CarouselEditorPage />} />
+          <Route path="settings" element={<StoreSettingsPage />} />
           <Route path="*" element={
             <div className="flex flex-col items-center justify-center py-24 gap-3">
               <p className="text-sm text-muted-foreground">Página em construção.</p>
@@ -45,7 +55,8 @@ export default function App() {
           } />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+        </Routes>
+      </StoreProvider>
     </BrowserRouter>
   );
 }

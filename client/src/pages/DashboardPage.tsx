@@ -1,3 +1,5 @@
+import { useStore } from '../context/StoreContext';
+import { apiFetch } from "@/lib/api";
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation, Outlet, Link } from "react-router-dom";
 import {
@@ -9,10 +11,12 @@ import {
   PackageOpen,
   ArrowDownToLine,
   PlaySquare,
-  LayoutGrid
+  LayoutGrid,
+  Settings
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface AuthUser {
@@ -33,14 +37,19 @@ const navGroups = [
     items: [
       { icon: PlaySquare, label: "Vídeos", path: "/dashboard/videos" },
       { icon: LayoutGrid, label: "Carrosseis", path: "/dashboard/carousels" },
-      { icon: ImageIcon, label: "Mídias", path: "/dashboard/media" },
-    ],
+          ],
   },
   {
     label: "Catálogo",
     items: [
       { icon: PackageOpen, label: "Produtos", path: "/dashboard/products" },
       { icon: ArrowDownToLine, label: "Importar", path: "/dashboard/import" },
+    ],
+  },
+  {
+    label: "Configuração",
+    items: [
+      { icon: Settings, label: "Loja", path: "/dashboard/settings" },
     ],
   },
 ];
@@ -53,16 +62,23 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const path = location.pathname;
+  const { activeStore, loading: storeLoading } = useStore();
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
+    if (!storeLoading && !activeStore && path !== "/dashboard/stores") {
+      navigate("/dashboard/stores", { replace: true });
+    }
+  }, [storeLoading, activeStore, path, navigate]);
+
+  useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) { navigate("/"); return; }
 
-    fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+    apiFetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
       .then((data) => {
         if (data.user) setUser(data.user);
@@ -84,6 +100,7 @@ export default function DashboardPage() {
   else if (path === "/dashboard/products") { title = "Produtos"; subtitle = "Gerencie seu inventário importado"; }
   else if (path === "/dashboard/import") { title = "Importação"; subtitle = "Adicione produtos via feed XML"; }
   else if (path.startsWith("/dashboard/videos")) { title = "Shoppable Videos"; subtitle = "Crie experiências interativas para seus clientes"; }
+  else if (path.startsWith("/dashboard/settings")) { title = "Configurações"; subtitle = "Ajuste os parâmetros da loja e acesso"; }
 
   const Sidebar = (
     <aside className="flex flex-col h-full w-64 bg-foreground text-white">
@@ -151,13 +168,15 @@ export default function DashboardPage() {
     </aside>
   );
 
+  const hideSidebar = !activeStore;
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       {/* Desktop sidebar */}
-      <div className="hidden lg:flex shrink-0">{Sidebar}</div>
+      {!hideSidebar && <div className="hidden lg:flex shrink-0">{Sidebar}</div>}
 
       {/* Mobile sidebar */}
-      {sidebarOpen && (
+      {sidebarOpen && !hideSidebar && (
         <div className="fixed inset-0 z-40 lg:hidden flex">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
           <div className="relative z-50 flex">{Sidebar}</div>
@@ -168,12 +187,14 @@ export default function DashboardPage() {
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <header className="flex items-center gap-4 px-4 sm:px-6 lg:px-8 h-16 border-b border-border bg-card shrink-0">
-          <button
-            className="lg:hidden text-muted-foreground hover:text-foreground transition-colors duration-150 min-h-[44px] min-w-[44px] flex items-center justify-center"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu className="w-5 h-5" />
-          </button>
+          {!hideSidebar && (
+            <button
+              className="lg:hidden text-muted-foreground hover:text-foreground transition-colors duration-150 min-h-[44px] min-w-[44px] flex items-center justify-center"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
 
           <div className="flex-1">
             <h1 className="text-lg font-bold tracking-tight text-foreground">{title}</h1>
@@ -185,10 +206,14 @@ export default function DashboardPage() {
               <Skeleton className="h-8 w-28" />
             ) : (
               <>
-                <span className="text-sm text-muted-foreground hidden sm:block">
-                  Olá, <span className="font-medium text-foreground">{user?.name.split(" ")[0]}</span>
+                <Button variant="outline" size="sm" onClick={() => navigate("/dashboard/stores")} className="hidden md:flex h-8 text-xs font-semibold mr-2 border-primary/20 hover:bg-primary/5">
+                  Trocar Loja
+                </Button>
+                <div className="h-8 w-px bg-border hidden sm:block mx-1"></div>
+                <span className="text-sm text-muted-foreground hidden sm:block ml-2">
+                  Olá, <span className="font-medium text-foreground">{user?.name?.split(" ")[0]}</span>
                 </span>
-                <Avatar fallback={user ? getInitials(user.name) : "?"} size="sm" />
+                <Avatar fallback={user?.name ? getInitials(user.name) : "?"} size="sm" />
               </>
             )}
           </div>
