@@ -1,1 +1,0 @@
-ALTER TABLE "video_carousels" RENAME COLUMN "description" TO "subtitle";

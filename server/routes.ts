@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { eq, desc, ilike, or, sql, inArray, and } from "drizzle-orm";
 import fs from "fs";
 import { db } from "./db.js";
-import { users, stores, media, products, catalogImports, catalogSyncs, shoppableVideos, videoProducts, videoCarousels, carouselVideos } from "../shared/schema.js";
+import { users, stores, media, products, catalogImports, catalogSyncs, shoppableVideos, videoProducts, videoCarousels, carouselVideos, viewEvents } from "../shared/schema.js";
 import { upload, s3Client } from "./upload.js";
 import { sendVerificationEmail } from "./email.js";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from "uuid";
 import { publicScript } from "./public-script.js";
 import { purgeCloudflareCache } from "./cloudflare-purge.js";
 import { stripe, PLANS, PlanId } from "./stripe.js";
-import { shouldCountView } from "./view-tracker.js";
+import { shouldCountView, todayUTC } from "./view-tracker.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 
@@ -505,11 +505,20 @@ export function registerRoutes(app: Express) {
             if (targetStore) {
                 const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
                 if (shouldCountView(carouselId, ip)) {
-                    // Fire-and-forget: do NOT await so it never blocks anything
+                    const storeId = targetStore.id;
+                    const today = todayUTC();
+                    // Increment store-level cycle counter
                     db.update(stores)
                         .set({ currentCycleViews: sql`${stores.currentCycleViews} + 1` })
-                        .where(eq(stores.id, targetStore.id))
-                        .catch(err => console.error("[view-tracker] DB increment failed:", err));
+                        .where(eq(stores.id, storeId))
+                        .catch(err => console.error("[view-tracker] store increment failed:", err));
+                    // Upsert daily analytics row: INSERT ... ON CONFLICT ... DO UPDATE
+                    db.execute(sql`
+                        INSERT INTO view_events (store_id, carousel_id, date, count)
+                        VALUES (${storeId}, ${carouselId}, ${today}, 1)
+                        ON CONFLICT (store_id, carousel_id, date)
+                        DO UPDATE SET count = view_events.count + 1
+                    `).catch(err => console.error("[view-tracker] daily upsert failed:", err));
                 }
             }
         } catch (e: any) {
@@ -1042,6 +1051,35 @@ export function registerRoutes(app: Express) {
             return;
         }
         res.json({ success: true });
+    });
+
+    // ── Analytics ────────────────────────────────────────────────────────────────
+    // GET /api/analytics/views?from=YYYY-MM-DD&to=YYYY-MM-DD
+    app.get("/api/analytics/views", authMiddleware, async (req: Request, res: Response) => {
+        const storeId = getStoreId(req);
+        const { from, to } = req.query as { from?: string; to?: string };
+
+        if (!from || !to) return res.status(400).json({ error: "from e to são obrigatórios (YYYY-MM-DD)" });
+
+        try {
+            // Aggregate per-day across all carousels of this store
+            const rows = await db.execute(sql`
+                SELECT date, SUM(count)::int AS total
+                FROM view_events
+                WHERE store_id = ${storeId}
+                  AND date >= ${from}
+                  AND date <= ${to}
+                GROUP BY date
+                ORDER BY date ASC
+            `);
+
+            const byDay = (rows.rows as any[]).map(r => ({ date: r.date, views: r.total }));
+            const total = byDay.reduce((acc, r) => acc + r.views, 0);
+
+            res.json({ total, byDay });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
     });
 
     // Global Error Handler

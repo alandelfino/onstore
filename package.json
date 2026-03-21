@@ -31,6 +31,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.3",
+    "recharts": "^3.8.0",
     "resend": "^6.9.4",
     "stripe": "^20.4.1",
     "tailwind-merge": "^3.5.0",

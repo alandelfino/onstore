@@ -150,3 +150,16 @@ export const carouselVideos = pgTable("carousel_videos", {
 export type VideoCarousel = typeof videoCarousels.$inferSelect;
 export type NewVideoCarousel = typeof videoCarousels.$inferInsert;
 export type CarouselVideo = typeof carouselVideos.$inferSelect;
+
+// Per-day view analytics (upserted on each carousel view)
+export const viewEvents = pgTable("view_events", {
+  id: serial("id").primaryKey(),
+  storeId: integer("store_id").references(() => stores.id, { onDelete: "cascade" }).notNull(),
+  carouselId: integer("carousel_id").references(() => videoCarousels.id, { onDelete: "cascade" }).notNull(),
+  date: text("date").notNull(), // ISO date string: 'YYYY-MM-DD'
+  count: integer("count").notNull().default(0),
+}, (t) => ({
+  unq: unique("view_events_store_carousel_date_idx").on(t.storeId, t.carouselId, t.date),
+}));
+
+export type ViewEvent = typeof viewEvents.$inferSelect;

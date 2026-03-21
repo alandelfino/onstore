@@ -1,1 +1,0 @@
-ALTER TABLE "shoppable_videos" ADD COLUMN "auto_thumbnails" jsonb;
